@@ -19,9 +19,9 @@ use winit:: {
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop},
-    window::{Window, WindowAttributes, WindowId}
+    window::{Window, WindowAttributes, WindowId},
+    dpi::{LogicalSize, Size},
 };
-use winit::dpi::LogicalSize;
 use colors::{Colors, get_color, get_rgb};
 
 ///////////////////////////////////////
@@ -36,7 +36,9 @@ const HEIGHT: u32 = 240;
 ///////////////////////////////////////
 #[derive(Default)]
 struct App {
-    window: Option<Box<dyn Window>>,
+    window: Option<&'static Window>,
+    pixels: Option<Pixels<'static>>,
+    runtime: runtime::Runtime,
 }
 
 #[derive(Parser, Debug)]
@@ -50,6 +52,11 @@ struct Args {
 /// MAIN
 ///////////////////////////////////////
 fn main() -> Result<()> {
+    eprintln!("=========================================================");
+    eprintln!(">> CRAYON Interpreter ");
+    eprintln!("=========================================================");
+    eprintln!();
+
     let args = Args::parse();
 
     let source = fs::read_to_string(&args.file)
@@ -64,13 +71,11 @@ fn main() -> Result<()> {
     let event_loop = EventLoop::new()
         .context("Failed to create winit event loop")?;
 
-    let app: &'static mut App = Box::leak(Box::new(App::default()));
+    let app: &'static mut App = Box::leak(Box::new(App::new(runtime)));
 
     event_loop
         .run_app(app)
         .context("Event loop terminated with error")?;
-
-    let _ = source;
 
     Ok(())
 }
@@ -78,140 +83,103 @@ fn main() -> Result<()> {
 ///////////////////////////////////////
 /// IMPLEMENTATIONS
 ///////////////////////////////////////
+impl App {
+    fn new(runtime: runtime::Runtime) -> Self {
+        Self {
+            window: None,
+            pixels: None,
+            runtime,
+        }
+    }
+
+    fn render(&mut self) {
+        let Some(pixels) = self.pixels.as_mut() else { return };
+
+        let frame = pixels.frame_mut();
+        let fb_width = WIDTH as usize;
+        let fb_height = HEIGHT as usize;
+
+        // Background
+        let bg = get_rgb(Colors::BrightGreen);
+        for px in frame.chunks_exact_mut(4) {
+            px.copy_from_slice(&bg);
+        }
+
+        // Draw interpreter output lines
+        let fg = get_rgb(Colors::Black);
+        let mut y = 8i32;
+        let line_step = (glyphs::GLYPH_HEIGHT as i32) + 2;
+
+        for line in &self.runtime.lines {
+            text_renderer::draw_text(
+                frame,
+                fb_width,
+                fb_height,
+                8,
+                y,
+                line,
+                fg,
+                None,
+                1,
+            );
+            y += line_step;
+            if y + glyphs::GLYPH_HEIGHT as i32 >= HEIGHT as i32 {
+                break;
+            }
+        }
+
+        if pixels.render().is_err() {
+            // no event_loop here; caller handles close on next event
+        }
+    }
+}
+
 impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &dyn ActiveEventLoop) {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+
         let attrs = WindowAttributes::default()
-            .with_title("Crayon")
-            .with_min_surface_size(LogicalSize::new((WIDTH * 2) as f64, (HEIGHT * 2) as f64));
+            .with_title("Crayon - Extended Color Basic 2.1 Interpreter")
+            .with_maximized(true)
+            .with_inner_size(Size::Logical(LogicalSize::new(
+                (WIDTH * 2) as f64,
+                (HEIGHT * 2) as f64,
+            )));
 
         let window = event_loop.create_window(attrs).expect("create window");
-        self.window = Some(window);
+        let window_ref: &'static Window = Box::leak(Box::new(window));
+
+        let size = window_ref.inner_size();
+        let surface = SurfaceTexture::new(size.width, size.height, window_ref);
+        let pixels = Pixels::new(WIDTH, HEIGHT, surface).expect("create pixel buffer");
+
+        self.pixels = Some(pixels);
+        self.window = Some(window_ref);
+
+        window_ref.request_redraw();
     }
 
-    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
-
-    }
-
-    fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
-                if let Some(window) = self.window.as_ref() {
-                    let size = window.outer_size();
-                    let surface_texture = SurfaceTexture::new(size.width, size.height, window);
-                    let mut pixels = Pixels::new(WIDTH, HEIGHT, surface_texture).expect("create pixel buffer");
-
-                    let fb_width = WIDTH as usize;
-                    let fb_height = HEIGHT as usize;
-                    let frame = pixels.frame_mut();
-
-                    let foreground_color = get_rgb(Colors::Black);
-
-                    for (i, px) in frame.chunks_exact_mut(4).enumerate() {
-                        let x = (i as u32) % WIDTH;
-                        let y = (i as u32) / WIDTH;
-
-                        // let r = (x * 255 / WIDTH) as u8;
-                        // let g = (y * 255 / HEIGHT) as u8;
-                        // let b = 128u8;
-                        // let a = 255u8;
-                        let c = get_color(Colors::BrightGreen);
-                        let r = c.0 as u8;
-                        let g = c.1 as u8;
-                        let b = c.2 as u8;
-                        let a = c.3 as u8;
-
-                        px.copy_from_slice(&[r, g, b, a]);
-                    }
-
-                    text_renderer::draw_text(
-                        frame,
-                        fb_width,
-                        fb_height,
-                        20,                    // x
-                        40,                    // y
-                        "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-                        foreground_color,  // fg
-                        None,                  // transparent background
-                        1,                     // spacing
-                    );
-
-                    text_renderer::draw_text(
-                        frame,
-                        fb_width,
-                        fb_height,
-                        20,                    // x
-                        60,                    // y
-                        "abcdefghijklmnopqrstuvwxyz",
-                        foreground_color,  // fg
-                        None,                  // transparent background
-                        1,                     // spacing
-                    );
-
-                    text_renderer::draw_text(
-                        frame,
-                        fb_width,
-                        fb_height,
-                        20,                    // x
-                        80,                    // y
-                        "0123456789",
-                        foreground_color,  // fg
-                        None,                  // transparent background
-                        1,                     // spacing
-                    );
-
-                    text_renderer::draw_text(
-                        frame,
-                        fb_width,
-                        fb_height,
-                        20,                    // x
-                        100,                    // y
-                        "!@#$%^&*()",
-                        foreground_color,  // fg
-                        None,                  // transparent background
-                        1,                     // spacing
-                    );
-
-                    text_renderer::draw_text(
-                        frame,
-                        fb_width,
-                        fb_height,
-                        20,                    // x
-                        120,                    // y
-                        "`-=_+[]{};':,./<>?~\"\\",
-                        foreground_color,  // fg
-                        None,                  // transparent background
-                        1,                     // spacing
-                    );
-
-                    text_renderer::draw_text(
-                        frame,
-                        fb_width,
-                        fb_height,
-                        20,                    // x
-                        140,                    // y
-                        "Hello, world!",
-                        foreground_color,  // fg
-                        None,                  // transparent background
-                        1,                     // spacing
-                    );
-
-
-                    if pixels.render().is_err() {
-                        event_loop.exit();
-                    }
-                }
+                self.render();
             },
-            WindowEvent::SurfaceResized(size) => {
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
+            WindowEvent::Resized(size) => {
+                if let Some(p) = self.pixels.as_mut() {
+                    let _ = p.resize_surface(size.width, size.height);
+                }
+                if let Some(w) = self.window.as_ref() {
+                    w.request_redraw();
                 }
             }
             _ => { }
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
