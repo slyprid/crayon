@@ -2,7 +2,8 @@
 /// MODS
 ///////////////////////////////////////
 mod colors;
-pub mod glyphs;
+mod glyphs;
+mod text_renderer;
 
 ///////////////////////////////////////
 /// USINGS
@@ -75,6 +76,10 @@ impl ApplicationHandler for App {
                     let mut pixels = Pixels::new(WIDTH, HEIGHT, surface_texture).expect("create pixel buffer");
 
                     let frame = pixels.frame_mut();
+                    let fb_width = WIDTH as usize;
+                    let fb_height = HEIGHT as usize;
+
+                    let frame = pixels.frame_mut();
                     for (i, px) in frame.chunks_exact_mut(4).enumerate() {
                         let x = (i as u32) % WIDTH;
                         let y = (i as u32) / WIDTH;
@@ -91,6 +96,19 @@ impl ApplicationHandler for App {
 
                         px.copy_from_slice(&[r, g, b, a]);
                     }
+
+                    text_renderer::draw_text(
+                        frame,
+                        fb_width,
+                        fb_height,
+                        20,                    // x
+                        40,                    // y
+                        "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                        [255, 255, 255, 255],  // fg
+                        None,                  // transparent background
+                        1,                     // spacing
+                    );
+
 
                     if pixels.render().is_err() {
                         event_loop.exit();
