@@ -43,19 +43,91 @@ pub fn draw_char(
     }
 }
 
+/// Draw text and interpret common escape/control characters:
+/// - '\n' => next line (x reset)
+/// - '\r' => carriage return (x reset, same line)
+/// - '\t' => tab to next TAB_WIDTH stop
+/// - '\0' => ignored
+///
+/// Also wraps when reaching framebuffer width.
 pub fn draw_text(
     frame: &mut [u8],
     fb_width: usize,
     fb_height: usize,
-    mut x: i32,
+    x: i32,
     y: i32,
     text: &str,
     fg: [u8; 4],
     bg: Option<[u8; 4]>,
-    spacing: i32, // e.g. 1
+    spacing: i32,
 ) {
+    const TAB_WIDTH: i32 = 4;
+    let line_height = GLYPH_HEIGHT as i32 + 1;
+    let cell_w = GLYPH_WIDTH as i32 + spacing;
+
+    let start_x = x;
+    let mut cx = x;
+    let mut cy = y;
+
+    // raw-escape parser state: previous char was '\'
+    let mut escaping = false;
+
+    // helper closure to emit one "logical" char/control
+    let mut emit = |ch: char, cx: &mut i32, cy: &mut i32| {
+        match ch {
+            '\n' => {
+                *cx = start_x;
+                *cy += line_height;
+            }
+            '\r' => {
+                *cx = start_x;
+            }
+            '\t' => {
+                let rel = (*cx - start_x).max(0);
+                let col = if cell_w > 0 { rel / cell_w } else { 0 };
+                let next_tab_col = ((col / TAB_WIDTH) + 1) * TAB_WIDTH;
+                *cx = start_x + next_tab_col * cell_w;
+            }
+            '\0' => {}
+            _ => {
+                if *cx + GLYPH_WIDTH as i32 > fb_width as i32 {
+                    *cx = start_x;
+                    *cy += line_height;
+                }
+                if *cy + GLYPH_HEIGHT as i32 > fb_height as i32 {
+                    return;
+                }
+                draw_char(frame, fb_width, fb_height, *cx, *cy, ch, fg, bg);
+                *cx += cell_w;
+            }
+        }
+    };
+
     for ch in text.chars() {
-        draw_char(frame, fb_width, fb_height, x, y, ch, fg, bg);
-        x += GLYPH_WIDTH as i32 + spacing;
+        if escaping {
+            // interpret two-char escapes from raw text
+            let parsed = match ch {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '0' => '\0',
+                '\\' => '\\', // this is the part you asked for
+                _ => ch,      // unknown escape: just render char literally
+            };
+            emit(parsed, &mut cx, &mut cy);
+            escaping = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaping = true;
+        } else {
+            emit(ch, &mut cx, &mut cy);
+        }
+    }
+
+    // trailing '\' at end of string -> render it literally
+    if escaping {
+        emit('\\', &mut cx, &mut cy);
     }
 }

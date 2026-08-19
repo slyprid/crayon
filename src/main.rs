@@ -152,7 +152,7 @@ impl ApplicationHandler for App {
                         fb_height,
                         20,                    // x
                         120,                    // y
-                        "`-=_+[]{};':,./<>?`~",
+                        "`-=_+[]{};':,./<>?~\"\\",
                         foreground_color,  // fg
                         None,                  // transparent background
                         1,                     // spacing
