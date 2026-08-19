@@ -1,7 +1,9 @@
+use crate::runtime::ClsColor;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Print(String),
-    Cls,
+    Cls(Option<ClsColor>), // None = no arg
     Empty,
 }
 
@@ -11,18 +13,33 @@ pub fn parse_line(input: &str) -> Result<Command, String> {
         return Ok(Command::Empty);
     }
 
-    // Optional BASIC line number: "10 PRINT "HI""
-    if let Some((first, rest)) = s.split_once(' ') {
-        if first.chars().all(|c| c.is_ascii_digit()) {
-            s = rest.trim_start();
-        }
-    }
-
     let upper = s.to_ascii_uppercase();
 
     if upper == "CLS" {
         eprintln!(">> COMMAND: CLS");
-        return Ok(Command::Cls);
+        return Ok(Command::Cls(None));
+    }
+
+    if upper.len() == 4 && upper.starts_with("CLS") {
+        let digit = upper.as_bytes()[3];
+        if digit.is_ascii_digit() {
+            let n = (digit - b'0') as u8;
+            let color = ClsColor::from_u8(n)
+                .ok_or_else(|| format!("CLS argument out of range 0..8, got '{n}'"))?;
+            eprintln!(">> COMMAND: CLS{n}");
+            return Ok(Command::Cls(Some(color)));
+        }
+    }
+
+    if upper.starts_with("CLS ") {
+        let arg = s[3..].trim(); // text after CLS
+        let n: u8 = arg
+            .parse()
+            .map_err(|_| format!("CLS argument must be integer 0..8, got '{arg}'"))?;
+        let color = ClsColor::from_u8(n)
+            .ok_or_else(|| format!("CLS argument out of range 0..8, got '{n}'"))?;
+        eprintln!(">> COMMAND: CLS {arg} [{n}]");
+        return Ok(Command::Cls(Some(color)));
     }
 
     if upper.starts_with("PRINT") {
@@ -46,3 +63,4 @@ pub fn parse_line(input: &str) -> Result<Command, String> {
 
     Err(format!("Unsupported statement: {s}"))
 }
+

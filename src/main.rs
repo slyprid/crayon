@@ -68,6 +68,10 @@ fn main() -> Result<()> {
          .map_err(Error::msg)
          .with_context(|| format!("Failed to interpret '{}'", args.file))?;
 
+    if let Err(e) = engine::run_program(&source, &mut runtime) {
+        eprintln!("Interpreter error: {}", e);
+    }
+
     let event_loop = EventLoop::new()
         .context("Failed to create winit event loop")?;
 
@@ -100,7 +104,7 @@ impl App {
         let fb_height = HEIGHT as usize;
 
         // Background
-        let bg = get_rgb(Colors::BrightGreen);
+        let bg = self.runtime.current_bg_rgba();
         for px in frame.chunks_exact_mut(4) {
             px.copy_from_slice(&bg);
         }
