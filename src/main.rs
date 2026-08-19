@@ -17,7 +17,7 @@ use winit:: {
     window::{Window, WindowAttributes, WindowId}
 };
 use winit::dpi::LogicalSize;
-use colors::{Colors, get_color};
+use colors::{Colors, get_color, get_rgb};
 
 ///////////////////////////////////////
 /// CONSTANTS
@@ -75,11 +75,12 @@ impl ApplicationHandler for App {
                     let surface_texture = SurfaceTexture::new(size.width, size.height, window);
                     let mut pixels = Pixels::new(WIDTH, HEIGHT, surface_texture).expect("create pixel buffer");
 
-                    let frame = pixels.frame_mut();
                     let fb_width = WIDTH as usize;
                     let fb_height = HEIGHT as usize;
-
                     let frame = pixels.frame_mut();
+
+                    let foreground_color = get_rgb(Colors::Black);
+
                     for (i, px) in frame.chunks_exact_mut(4).enumerate() {
                         let x = (i as u32) % WIDTH;
                         let y = (i as u32) / WIDTH;
@@ -104,7 +105,67 @@ impl ApplicationHandler for App {
                         20,                    // x
                         40,                    // y
                         "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-                        [255, 255, 255, 255],  // fg
+                        foreground_color,  // fg
+                        None,                  // transparent background
+                        1,                     // spacing
+                    );
+
+                    text_renderer::draw_text(
+                        frame,
+                        fb_width,
+                        fb_height,
+                        20,                    // x
+                        60,                    // y
+                        "abcdefghijklmnopqrstuvwxyz",
+                        foreground_color,  // fg
+                        None,                  // transparent background
+                        1,                     // spacing
+                    );
+
+                    text_renderer::draw_text(
+                        frame,
+                        fb_width,
+                        fb_height,
+                        20,                    // x
+                        80,                    // y
+                        "0123456789",
+                        foreground_color,  // fg
+                        None,                  // transparent background
+                        1,                     // spacing
+                    );
+
+                    text_renderer::draw_text(
+                        frame,
+                        fb_width,
+                        fb_height,
+                        20,                    // x
+                        100,                    // y
+                        "!@#$%^&*()",
+                        foreground_color,  // fg
+                        None,                  // transparent background
+                        1,                     // spacing
+                    );
+
+                    text_renderer::draw_text(
+                        frame,
+                        fb_width,
+                        fb_height,
+                        20,                    // x
+                        120,                    // y
+                        "`-=_+[]{};':,./<>?`~",
+                        foreground_color,  // fg
+                        None,                  // transparent background
+                        1,                     // spacing
+                    );
+
+                    text_renderer::draw_text(
+                        frame,
+                        fb_width,
+                        fb_height,
+                        20,                    // x
+                        140,                    // y
+                        "Hello, world!",
+                        foreground_color,  // fg
                         None,                  // transparent background
                         1,                     // spacing
                     );

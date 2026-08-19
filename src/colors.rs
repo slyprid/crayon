@@ -210,6 +210,15 @@ pub fn get_color(color: Colors) -> (u8, u8, u8, u8) {
     (r, g, b, 255u8)
 }
 
+pub fn get_rgb(color: Colors) -> [u8; 4] {
+    let hex = color as u32;
+    let r = ((hex >> 16) & 0xFF) as u8;
+    let g = ((hex >> 8) & 0xFF) as u8;
+    let b = (hex & 0xFF) as u8;
+
+    [r, g, b, 255u8]
+}
+
 pub fn get_color_from_u32(color: u32) -> (u8, u8, u8, u8) {
     let hex = color as u32;
     let r = ((hex >> 16) & 0xFF) as u8;
