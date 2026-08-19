@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::interpreter::{parse_line, Command};
 use crate::runtime::Runtime;
+use crate::audio;
 
 #[derive(Debug, Clone)]
 pub struct ProgramLine {
@@ -17,6 +18,11 @@ pub struct Program {
     pub line_index: HashMap<u32, usize>,
     pub pc: usize,
     pub halted: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum VmEffect {
+    PlayTone { hz: u32, ms: u64 },
 }
 
 fn split_basic_line(raw: &str) -> (Option<u32>, &str) {
@@ -72,13 +78,13 @@ impl Program {
         })
     }
 
-    pub fn step(&mut self, rt: &mut Runtime) -> Result<(), String> {
+    pub fn step(&mut self, rt: &mut Runtime) -> Result<Option<VmEffect>, String> {
         if self.halted {
-            return Ok(());
+            return Ok(None);
         }
         if self.pc >= self.lines.len() {
             self.halted = true;
-            return Ok(());
+            return Ok(None);
         }
 
         let cur = &self.lines[self.pc];
@@ -88,23 +94,33 @@ impl Program {
             .map_err(|e| format!("{label}: {e} | source: {}", cur.raw.trim()))?;
 
         match cmd {
-            Command::Empty => self.pc += 1,
+            Command::Empty => {
+                self.pc += 1;
+                Ok(None)
+            },
             Command::Print(s) => {
                 rt.print(s);
                 self.pc += 1;
+                Ok(None)
             }
             Command::Cls(color) => {
                 rt.cls(color);
                 self.pc += 1;
+                Ok(None)
             }
             Command::Goto(target) => {
                 let Some(&dest) = self.line_index.get(&target) else {
                     return Err(format!("{label}: GOTO target {} not found", target));
                 };
                 self.pc = dest;
+                Ok(None)
+            },
+            Command::Sound { tone, len } => {
+                let hz = crate::audio::Audio::sound_to_hz(tone);
+                let ms = crate::audio::Audio::sound_len_to_ms(len);
+                self.pc += 1;
+                Ok(Some(VmEffect::PlayTone { hz, ms }))
             }
         }
-
-        Ok(())
     }
 }

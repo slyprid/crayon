@@ -5,6 +5,7 @@ pub enum Command {
     Print(String),
     Cls(Option<ClsColor>), // None = no arg
     Goto(u32),
+    Sound { tone: u8, len: u8 },
     Empty,
 }
 
@@ -71,6 +72,43 @@ pub fn parse_line(input: &str) -> Result<Command, String> {
             .parse()
             .map_err(|_| format!("GOTO target must be a line number, got '{arg}'"))?;
         return Ok(Command::Goto(target));
+    }
+
+    if upper.starts_with("SOUND") {
+        let arg_text = s[5..].trim_start();
+        if arg_text.is_empty() {
+            return Err("SOUND requires two arguments: SOUND tone,length".to_string());
+        }
+
+        let mut parts = arg_text.split(',').map(|p| p.trim());
+        let tone_s = parts.next().unwrap_or_default();
+        let len_s = parts.next().unwrap_or_default();
+
+        // reject missing or extra args
+        if tone_s.is_empty() || len_s.is_empty() || parts.next().is_some() {
+            return Err(format!(
+                "SOUND format is SOUND tone,length with both values 1..255, got '{arg_text}'"
+            ));
+        }
+
+        let tone_u16: u16 = tone_s
+            .parse()
+            .map_err(|_| format!("SOUND tone must be integer 1..255, got '{tone_s}'"))?;
+        let len_u16: u16 = len_s
+            .parse()
+            .map_err(|_| format!("SOUND length must be integer 1..255, got '{len_s}'"))?;
+
+        if !(1..=255).contains(&tone_u16) {
+            return Err(format!("SOUND tone out of range 1..255, got {}", tone_u16));
+        }
+        if !(1..=255).contains(&len_u16) {
+            return Err(format!("SOUND length out of range 1..255, got {}", len_u16));
+        }
+
+        return Ok(Command::Sound {
+            tone: tone_u16 as u8,
+            len: len_u16 as u8,
+        });
     }
 
     Err(format!("Unsupported statement: {s}"))

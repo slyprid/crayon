@@ -7,6 +7,7 @@ mod text_renderer;
 mod interpreter;
 mod runtime;
 mod engine;
+mod audio;
 
 ///////////////////////////////////////
 /// USINGS
@@ -41,6 +42,7 @@ struct App {
     runtime: runtime::Runtime,
     program: engine::Program,
     last_error: Option<String>,
+    audio: Option<audio::Audio>,
 }
 
 #[derive(Parser, Debug)]
@@ -91,6 +93,7 @@ impl App {
             runtime,
             program,
             last_error: None,
+            audio: audio::Audio::new().ok(),
         }
     }
 
@@ -104,11 +107,19 @@ impl App {
                 break;
             }
 
-            if let Err(e) = self.program.step(&mut self.runtime) {
-                eprintln!("Interpreter error: {}", e);
-                self.last_error = Some(e);
-                self.program.halted = true;
-                break;
+            match self.program.step(&mut self.runtime) {
+                Ok(Some(engine::VmEffect::PlayTone { hz, ms })) => {
+                    if let Some(audio) = self.audio.as_ref() {
+                        let _ = audio.play_tone_hz(hz, ms, 0.20);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("Interpreter error: {}", e);
+                    self.last_error = Some(e);
+                    self.program.halted = true;
+                    break;
+                }
             }
         }
     }

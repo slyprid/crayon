@@ -8,3 +8,4 @@ clap = { version = "4.6.6", features = ["derive"] }
 winit = "0.30.5"
 pixels = "0.17.2"
 anyhow = "1.0.104"
+rodio = "0.19"
