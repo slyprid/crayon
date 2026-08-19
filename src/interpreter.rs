@@ -4,6 +4,7 @@ use crate::runtime::ClsColor;
 pub enum Command {
     Print(String),
     Cls(Option<ClsColor>), // None = no arg
+    Goto(u32),
     Empty,
 }
 
@@ -59,6 +60,17 @@ pub fn parse_line(input: &str) -> Result<Command, String> {
         };
 
         return Ok(Command::Print(text));
+    }
+
+    if upper.starts_with("GOTO") {
+        let arg = s[4..].trim_start();
+        if arg.is_empty() {
+            return Err("GOTO requires a target line number".to_string());
+        }
+        let target: u32 = arg
+            .parse()
+            .map_err(|_| format!("GOTO target must be a line number, got '{arg}'"))?;
+        return Ok(Command::Goto(target));
     }
 
     Err(format!("Unsupported statement: {s}"))

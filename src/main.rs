@@ -29,16 +29,18 @@ use colors::{Colors, get_color, get_rgb};
 ///////////////////////////////////////
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 240;
+const STEPS_PER_FRAME: usize = 500;
 
 
 ///////////////////////////////////////
 /// STRUCTS
 ///////////////////////////////////////
-#[derive(Default)]
 struct App {
     window: Option<&'static Window>,
     pixels: Option<Pixels<'static>>,
     runtime: runtime::Runtime,
+    program: engine::Program,
+    last_error: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -62,20 +64,14 @@ fn main() -> Result<()> {
     let source = fs::read_to_string(&args.file)
         .with_context(|| format!("Failed to read '{}'", args.file))?;
 
-    // If you have interpreter execution:
-    let mut runtime = runtime::Runtime::default();
-    engine::run_program(&source, &mut runtime)
-         .map_err(Error::msg)
-         .with_context(|| format!("Failed to interpret '{}'", args.file))?;
+    let program = engine::Program::from_source(&source)
+        .map_err(anyhow::Error::msg)
+        .with_context(|| format!("Failed to parse '{}'", args.file))?;
 
-    if let Err(e) = engine::run_program(&source, &mut runtime) {
-        eprintln!("Interpreter error: {}", e);
-    }
+    let runtime = runtime::Runtime::default();
 
-    let event_loop = EventLoop::new()
-        .context("Failed to create winit event loop")?;
-
-    let app: &'static mut App = Box::leak(Box::new(App::new(runtime)));
+    let event_loop = EventLoop::new().context("Failed to create event loop")?;
+    let app: &'static mut App = Box::leak(Box::new(App::new(runtime, program)));
 
     event_loop
         .run_app(app)
@@ -88,11 +84,32 @@ fn main() -> Result<()> {
 /// IMPLEMENTATIONS
 ///////////////////////////////////////
 impl App {
-    fn new(runtime: runtime::Runtime) -> Self {
+    fn new(runtime: runtime::Runtime, program: engine::Program) -> Self {
         Self {
             window: None,
             pixels: None,
             runtime,
+            program,
+            last_error: None,
+        }
+    }
+
+    fn tick_interpreter(&mut self) {
+        if self.program.halted || self.last_error.is_some() {
+            return;
+        }
+
+        for _ in 0..STEPS_PER_FRAME {
+            if self.program.halted {
+                break;
+            }
+
+            if let Err(e) = self.program.step(&mut self.runtime) {
+                eprintln!("Interpreter error: {}", e);
+                self.last_error = Some(e);
+                self.program.halted = true;
+                break;
+            }
         }
     }
 
@@ -132,6 +149,22 @@ impl App {
             }
         }
 
+        if let Some(err) = &self.last_error {
+            let err_fg = get_rgb(Colors::BrightRed);
+            let y_err = HEIGHT as i32 - (glyphs::GLYPH_HEIGHT as i32 + 4);
+            text_renderer::draw_text(
+                frame,
+                fb_width,
+                fb_height,
+                8,
+                y_err.max(0),
+                err,
+                err_fg,
+                None,
+                1,
+            );
+        }
+
         if pixels.render().is_err() {
             // no event_loop here; caller handles close on next event
         }
@@ -153,6 +186,8 @@ impl ApplicationHandler for App {
             )));
 
         let window = event_loop.create_window(attrs).expect("create window");
+        window.set_maximized(true);
+
         let window_ref: &'static Window = Box::leak(Box::new(window));
 
         let size = window_ref.inner_size();
@@ -169,6 +204,7 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
+                self.tick_interpreter();
                 self.render();
             },
             WindowEvent::Resized(size) => {
