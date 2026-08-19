@@ -4,10 +4,15 @@
 mod colors;
 mod glyphs;
 mod text_renderer;
+mod interpreter;
+mod runtime;
+mod engine;
 
 ///////////////////////////////////////
 /// USINGS
 ///////////////////////////////////////
+use anyhow::{Context, Error, Result};
+use std::fs;
 use clap::Parser;
 use pixels::{Pixels, SurfaceTexture};
 use winit:: {
@@ -31,7 +36,7 @@ const HEIGHT: u32 = 240;
 ///////////////////////////////////////
 #[derive(Default)]
 struct App {
-    window: Option<Window>,
+    window: Option<Box<dyn Window>>,
 }
 
 #[derive(Parser, Debug)]
@@ -44,34 +49,55 @@ struct Args {
 ///////////////////////////////////////
 /// MAIN
 ///////////////////////////////////////
-fn main() -> Result<(), winit::error::EventLoopError> {
+fn main() -> Result<()> {
     let args = Args::parse();
-    let event_loop = EventLoop::new()?;
-    let mut app = App::default();
-    event_loop.run_app(&mut app)
 
-    //println!("Parsing file: {}", args.file)
+    let source = fs::read_to_string(&args.file)
+        .with_context(|| format!("Failed to read '{}'", args.file))?;
+
+    // If you have interpreter execution:
+    let mut runtime = runtime::Runtime::default();
+    engine::run_program(&source, &mut runtime)
+         .map_err(Error::msg)
+         .with_context(|| format!("Failed to interpret '{}'", args.file))?;
+
+    let event_loop = EventLoop::new()
+        .context("Failed to create winit event loop")?;
+
+    let app: &'static mut App = Box::leak(Box::new(App::default()));
+
+    event_loop
+        .run_app(app)
+        .context("Event loop terminated with error")?;
+
+    let _ = source;
+
+    Ok(())
 }
 
 ///////////////////////////////////////
 /// IMPLEMENTATIONS
 ///////////////////////////////////////
 impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    fn resumed(&mut self, event_loop: &dyn ActiveEventLoop) {
         let attrs = WindowAttributes::default()
             .with_title("Crayon")
-            .with_inner_size(LogicalSize::new((WIDTH * 2) as f64, (HEIGHT * 2) as f64));
+            .with_min_surface_size(LogicalSize::new((WIDTH * 2) as f64, (HEIGHT * 2) as f64));
 
         let window = event_loop.create_window(attrs).expect("create window");
         self.window = Some(window);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
+    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
+
+    }
+
+    fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
                 if let Some(window) = self.window.as_ref() {
-                    let size = window.inner_size();
+                    let size = window.outer_size();
                     let surface_texture = SurfaceTexture::new(size.width, size.height, window);
                     let mut pixels = Pixels::new(WIDTH, HEIGHT, surface_texture).expect("create pixel buffer");
 
@@ -176,7 +202,7 @@ impl ApplicationHandler for App {
                     }
                 }
             },
-            WindowEvent::Resized(size) => {
+            WindowEvent::SurfaceResized(size) => {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -185,7 +211,7 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
