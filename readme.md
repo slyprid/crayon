@@ -9,6 +9,8 @@
 | ✅ | PRINT | Printing of strings, math expressions, and compound string/expressions |
 | ✅ | LET num | Creating numeric variables |
 | ✅ | LET str | Creating string variables |
+| ✅ | var = num | Implicit assignment of numerics |
+| ✅ | var = str | Implicit assignment of strings |
 | ✅ | CLS | Clearing background, with basic 9 colors |
 | ✅ | GOTO | Jump to line number |
 | ✅ | SOUND | Play sound at a specified frequency and length |

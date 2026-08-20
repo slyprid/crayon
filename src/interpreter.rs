@@ -53,6 +53,12 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
 
     let upper = s.to_ascii_uppercase();
 
+    // Explicit LET: LET A = 10 / LET X$ = "HELLO"
+    if upper.starts_with("LET ") {
+        let rest = s[3..].trim_start(); // everything after LET
+        return parse_assignment_core(rest);
+    }
+
     if upper == "CLS" {
         eprintln!(">> COMMAND: CLS");
         return Ok(Command::Cls(None));
@@ -135,32 +141,12 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         });
     }
 
-    if upper.starts_with("LET ") {
-        let rest = s[3..].trim_start();
-        let Some((lhs_raw, rhs_raw)) = rest.split_once('=') else {
-            return Err(RuntimeError::syntax("LET requires '='"));
-        };
-
+    // Implicit assignment (no LET): A = 10 / X$ = "HELLO"
+    // Kept late so PRINT/GOTO/etc. are not mistaken for assignment statements.
+    if let Some((lhs_raw, _rhs_raw)) = s.split_once('=') {
         let lhs = lhs_raw.trim().to_ascii_uppercase();
-        let rhs = rhs_raw.trim();
-
-        if lhs.ends_with('$') {
-            if !is_valid_str_var_name(&lhs) {
-                return Err(RuntimeError::syntax(format!("Invalid string variable '{}'", lhs)));
-            }
-            if !(rhs.starts_with('"') && rhs.ends_with('"') && rhs.len() >= 2) {
-                return Err(RuntimeError::type_mismatch(
-                    "Type Mismatch: string variable requires quoted string",
-                ));
-            }
-            let value = rhs[1..rhs.len() - 1].to_string();
-            return Ok(Command::LetStr { name: lhs, value });
-        } else {
-            if !is_valid_num_var_name(&lhs) {
-                return Err(RuntimeError::syntax(format!("Invalid numeric variable '{}'", lhs)));
-            }
-            let expr = parse_expr(&rhs.to_ascii_uppercase())?;
-            return Ok(Command::LetNum { name: lhs, expr });
+        if is_valid_num_var_name(&lhs) || is_valid_str_var_name(&lhs) {
+            return parse_assignment_core(s);
         }
     }
 
@@ -397,4 +383,32 @@ fn is_valid_str_var_name(name: &str) -> bool {
     }
     let core = &name[..name.len() - 1];
     is_valid_num_var_name(core)
+}
+
+fn parse_assignment_core(text: &str) -> Result<Command, RuntimeError> {
+    let Some((lhs_raw, rhs_raw)) = text.split_once('=') else {
+        return Err(RuntimeError::syntax("Assignment requires '='"));
+    };
+
+    let lhs = lhs_raw.trim().to_ascii_uppercase();
+    let rhs = rhs_raw.trim();
+
+    if lhs.ends_with('$') {
+        if !is_valid_str_var_name(&lhs) {
+            return Err(RuntimeError::syntax(format!("Invalid string variable '{}'", lhs)));
+        }
+        if !(rhs.starts_with('"') && rhs.ends_with('"') && rhs.len() >= 2) {
+            return Err(RuntimeError::type_mismatch(
+                "Type Mismatch: string variable requires quoted string",
+            ));
+        }
+        let value = rhs[1..rhs.len() - 1].to_string();
+        Ok(Command::LetStr { name: lhs, value })
+    } else {
+        if !is_valid_num_var_name(&lhs) {
+            return Err(RuntimeError::syntax(format!("Invalid numeric variable '{}'", lhs)));
+        }
+        let expr = parse_expr(&rhs.to_ascii_uppercase())?;
+        Ok(Command::LetNum { name: lhs, expr })
+    }
 }
