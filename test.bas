@@ -8,7 +8,9 @@
 80 print "Lets mess with variables"
 90 LET A = 10
 100 LET B = 5
-110 LET $X = "HELLO"
-120 LET $Y = "WORLD"
+110 LET X$ = "HELLO"
+120 LET Y$ = "WORLD"
 130 PRINT A + B
-140 PRINT $X " " $Y
+140 PRINT X$
+150 PRINT Y$
+160 PRINT X$ " " Y$

@@ -136,30 +136,30 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
     }
 
     if upper.starts_with("LET ") {
-        let rest = s[3..].trim_start(); // after LET
-        let Some((lhs, rhs)) = rest.split_once('=') else {
+        let rest = s[3..].trim_start();
+        let Some((lhs_raw, rhs_raw)) = rest.split_once('=') else {
             return Err(RuntimeError::syntax("LET requires '='"));
         };
 
-        let lhs = lhs.trim().to_ascii_uppercase();
-        let rhs = rhs.trim();
+        let lhs = lhs_raw.trim().to_ascii_uppercase();
+        let rhs = rhs_raw.trim();
 
-        if lhs.starts_with('$') {
+        if lhs.ends_with('$') {
             if !is_valid_str_var_name(&lhs) {
                 return Err(RuntimeError::syntax(format!("Invalid string variable '{}'", lhs)));
             }
             if !(rhs.starts_with('"') && rhs.ends_with('"') && rhs.len() >= 2) {
                 return Err(RuntimeError::type_mismatch(
-                    "Type Mismatch: string variable requires quoted string"
+                    "Type Mismatch: string variable requires quoted string",
                 ));
             }
-            let value = rhs[1..rhs.len()-1].to_string();
+            let value = rhs[1..rhs.len() - 1].to_string();
             return Ok(Command::LetStr { name: lhs, value });
         } else {
-            if !is_valid_var_name(&lhs) {
+            if !is_valid_num_var_name(&lhs) {
                 return Err(RuntimeError::syntax(format!("Invalid numeric variable '{}'", lhs)));
             }
-            let expr = parse_expr(rhs)?; // numeric expression only
+            let expr = parse_expr(&rhs.to_ascii_uppercase())?;
             return Ok(Command::LetNum { name: lhs, expr });
         }
     }
@@ -173,25 +173,39 @@ fn parse_print_parts(mut s: &str) -> Result<Vec<PrintPart>, RuntimeError> {
     while !s.trim_start().is_empty() {
         s = s.trim_start();
 
+        // 1) quoted string literal
         if s.starts_with('"') {
-            // parse quoted text
             let rest = &s[1..];
             let Some(end) = rest.find('"') else {
-                return Err(RuntimeError::syntax("Unterminated string in PRINT".to_string()));
+                return Err(RuntimeError::syntax("Unterminated string in PRINT"));
             };
-            let text = &rest[..end];
-            parts.push(PrintPart::Text(text.to_string()));
+            parts.push(PrintPart::Text(rest[..end].to_string()));
             s = &rest[end + 1..];
-        } else {
-            // parse expression until next quote or end
-            let end = s.find('"').unwrap_or(s.len());
-            let expr_src = s[..end].trim();
-            if !expr_src.is_empty() {
-                let expr = parse_expr(expr_src)?;
-                parts.push(PrintPart::Expr(expr));
-            }
-            s = &s[end..];
+            continue;
         }
+
+        // 2) string variable token like X$, AB$, A1$
+        // token = up to whitespace or quote
+        let token_end = s
+            .find(|ch: char| ch.is_whitespace() || ch == '"')
+            .unwrap_or(s.len());
+        let token = &s[..token_end];
+        let token_up = token.to_ascii_uppercase();
+
+        if is_valid_str_var_name(&token_up) {
+            parts.push(PrintPart::StrVar(token_up));
+            s = &s[token_end..];
+            continue;
+        }
+
+        // 3) otherwise parse numeric expression segment until next quote
+        let end = s.find('"').unwrap_or(s.len());
+        let expr_src = s[..end].trim();
+        if !expr_src.is_empty() {
+            let expr = parse_expr(&expr_src.to_ascii_uppercase())?;
+            parts.push(PrintPart::Expr(expr));
+        }
+        s = &s[end..];
     }
 
     Ok(parts)
@@ -252,6 +266,35 @@ fn parse_expr(input: &str) -> Result<Expr, RuntimeError> {
                 .map_err(|_| RuntimeError::syntax(format!("Invalid number '{num_str}'")))?;
             vals.push(Expr::Num(n));
             continue;
+        }
+
+        // identifier: A .. Z, optional second char [A-Z0-9]
+        if c.is_ascii_uppercase() {
+            let start = i;
+            i += 1;
+
+            if i < chars.len() && (chars[i].is_ascii_uppercase() || chars[i].is_ascii_digit()) {
+                i += 1;
+            }
+
+            // third alnum char is invalid for your 1-2 char rule
+            if i < chars.len() && (chars[i].is_ascii_uppercase() || chars[i].is_ascii_digit()) {
+                let bad: String = chars[start..=i].iter().collect();
+                return Err(RuntimeError::syntax(format!(
+                    "Invalid variable name '{}': max 2 chars",
+                    bad
+                )));
+            }
+
+            let name: String = chars[start..i].iter().collect();
+            vals.push(Expr::Var(name));
+            continue;
+        }
+
+        if c == '$' {
+            return Err(RuntimeError::type_mismatch(
+                "Type Mismatch: string variable used in numeric expression",
+            ));
         }
 
         let op = match c {
@@ -333,17 +376,25 @@ impl fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
-fn is_valid_var_name(name: &str) -> bool {
-    let bytes = name.as_bytes();
-    if bytes.is_empty() || bytes.len() > 2 { return false; }
-    if !bytes[0].is_ascii_uppercase() { return false; }
-    if bytes.len() == 2 && !(bytes[1].is_ascii_uppercase() || bytes[1].is_ascii_digit()) {
+fn is_valid_num_var_name(name: &str) -> bool {
+    let b = name.as_bytes();
+    if b.is_empty() || b.len() > 2 {
+        return false;
+    }
+    if !b[0].is_ascii_uppercase() {
+        return false;
+    }
+    if b.len() == 2 && !(b[1].is_ascii_uppercase() || b[1].is_ascii_digit()) {
         return false;
     }
     true
 }
 
 fn is_valid_str_var_name(name: &str) -> bool {
-    if !name.starts_with('$') { return false; }
-    is_valid_var_name(&name[1..])
+    // X$, AB$, A1$
+    if !name.ends_with('$') {
+        return false;
+    }
+    let core = &name[..name.len() - 1];
+    is_valid_num_var_name(core)
 }
