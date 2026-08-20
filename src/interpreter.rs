@@ -1,5 +1,24 @@
-use crate::runtime::ClsColor;
 use std::fmt;
+
+use crate:: {
+    colors::ClsColor,
+    runtime::Runtime,
+};
+
+//////////////////////////////////////////
+/// Available Keywords / Commands
+//////////////////////////////////////////
+#[derive(Debug, Clone, PartialEq)]
+pub enum Command {
+    Print(Vec<PrintPart>),
+    LetNum { name: String, expr: Expr },
+    LetStr { name: String, value: String },
+    Input { prompt: Option<String>, var: String },
+    Cls(Option<ClsColor>), // None = no arg
+    Goto(u32),
+    Sound { tone: u8, len: u8 },
+    Empty,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeErrorKind {
@@ -34,17 +53,9 @@ pub enum PrintPart {
     StrVar(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Command {
-    Print(Vec<PrintPart>),
-    LetNum { name: String, expr: Expr },
-    LetStr { name: String, value: String },
-    Cls(Option<ClsColor>), // None = no arg
-    Goto(u32),
-    Sound { tone: u8, len: u8 },
-    Empty,
-}
-
+//////////////////////////////////////////
+/// PARSER
+//////////////////////////////////////////
 pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
     let mut s = input.trim();
     if s.is_empty() {
@@ -59,11 +70,13 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         return parse_assignment_core(rest);
     }
 
+    // CLS: Clear Screen
     if upper == "CLS" {
         eprintln!(">> COMMAND: CLS");
         return Ok(Command::Cls(None));
     }
 
+    // CLS: Clear Screen with specified color (Compressed)
     if upper.len() == 4 && upper.starts_with("CLS") {
         let digit = upper.as_bytes()[3];
         if digit.is_ascii_digit() {
@@ -75,6 +88,7 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         }
     }
 
+    // CLS: Clear screen with specified color
     if upper.starts_with("CLS ") {
         let arg = s[3..].trim(); // text after CLS
         let n: u8 = arg
@@ -86,6 +100,7 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         return Ok(Command::Cls(Some(color)));
     }
 
+    // PRINT: Print to screen
     if upper.starts_with("PRINT") {
         let rest = s[5..].trim_start();
         if rest.is_empty() {
@@ -95,6 +110,7 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         return Ok(Command::Print(parts));
     }
 
+    // GOTO: Jump to a specified line number in the code
     if upper.starts_with("GOTO") {
         let arg = s[4..].trim_start();
         if arg.is_empty() {
@@ -106,6 +122,7 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         return Ok(Command::Goto(target));
     }
 
+    // SOUND: Play a specified frequency for a set amount of time
     if upper.starts_with("SOUND") {
         let arg_text = s[5..].trim_start();
         if arg_text.is_empty() {
@@ -151,6 +168,37 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
     }
 
     Err(RuntimeError::syntax(("?SN ERROR: {s}")))
+}
+
+//////////////////////////////////
+/// FUNCTIONS
+//////////////////////////////////
+fn parse_assignment_core(text: &str) -> Result<Command, RuntimeError> {
+    let Some((lhs_raw, rhs_raw)) = text.split_once('=') else {
+        return Err(RuntimeError::syntax("Assignment requires '='"));
+    };
+
+    let lhs = lhs_raw.trim().to_ascii_uppercase();
+    let rhs = rhs_raw.trim();
+
+    if lhs.ends_with('$') {
+        if !is_valid_str_var_name(&lhs) {
+            return Err(RuntimeError::syntax(format!("Invalid string variable '{}'", lhs)));
+        }
+        if !(rhs.starts_with('"') && rhs.ends_with('"') && rhs.len() >= 2) {
+            return Err(RuntimeError::type_mismatch(
+                "Type Mismatch: string variable requires quoted string",
+            ));
+        }
+        let value = rhs[1..rhs.len() - 1].to_string();
+        Ok(Command::LetStr { name: lhs, value })
+    } else {
+        if !is_valid_num_var_name(&lhs) {
+            return Err(RuntimeError::syntax(format!("Invalid numeric variable '{}'", lhs)));
+        }
+        let expr = parse_expr(&rhs.to_ascii_uppercase())?;
+        Ok(Command::LetNum { name: lhs, expr })
+    }
 }
 
 fn parse_print_parts(mut s: &str) -> Result<Vec<PrintPart>, RuntimeError> {
@@ -383,32 +431,4 @@ fn is_valid_str_var_name(name: &str) -> bool {
     }
     let core = &name[..name.len() - 1];
     is_valid_num_var_name(core)
-}
-
-fn parse_assignment_core(text: &str) -> Result<Command, RuntimeError> {
-    let Some((lhs_raw, rhs_raw)) = text.split_once('=') else {
-        return Err(RuntimeError::syntax("Assignment requires '='"));
-    };
-
-    let lhs = lhs_raw.trim().to_ascii_uppercase();
-    let rhs = rhs_raw.trim();
-
-    if lhs.ends_with('$') {
-        if !is_valid_str_var_name(&lhs) {
-            return Err(RuntimeError::syntax(format!("Invalid string variable '{}'", lhs)));
-        }
-        if !(rhs.starts_with('"') && rhs.ends_with('"') && rhs.len() >= 2) {
-            return Err(RuntimeError::type_mismatch(
-                "Type Mismatch: string variable requires quoted string",
-            ));
-        }
-        let value = rhs[1..rhs.len() - 1].to_string();
-        Ok(Command::LetStr { name: lhs, value })
-    } else {
-        if !is_valid_num_var_name(&lhs) {
-            return Err(RuntimeError::syntax(format!("Invalid numeric variable '{}'", lhs)));
-        }
-        let expr = parse_expr(&rhs.to_ascii_uppercase())?;
-        Ok(Command::LetNum { name: lhs, expr })
-    }
 }

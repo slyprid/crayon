@@ -1,4 +1,4 @@
-use crate::glyphs::{get_glyph, GLYPH_HEIGHT, GLYPH_WIDTH};
+use crate::glyphs::{get_glyph, glyph_pixels, GLYPH_HEIGHT, GLYPH_WIDTH};
 
 #[inline]
 fn put_pixel(
@@ -129,5 +129,50 @@ pub fn draw_text(
     // trailing '\' at end of string -> render it literally
     if escaping {
         emit('\\', &mut cx, &mut cy);
+    }
+}
+
+/// Draw a glyph by glyph index using glyph pixel coordinate arrays.
+/// Assumes `crate::glyphs::glyph_pixels(glyph_id)` returns `Option<&'static [(u8,u8)]>`.
+pub fn draw_glyph(
+    frame: &mut [u8],
+    fb_width: usize,
+    fb_height: usize,
+    x: i32,
+    y: i32,
+    glyph_id: u16,
+    fg: [u8; 4],
+    _bg: Option<[u8; 4]>,
+    scale: u32,
+) {
+    let Some(pixels) = crate::glyphs::glyph_pixels(glyph_id) else {
+        return;
+    };
+
+    let s = scale as i32;
+
+    for &(gx, gy) in pixels {
+        let gx = gx as i32;
+        let gy = gy as i32;
+
+        for sy in 0..s {
+            for sx in 0..s {
+                let px = x + gx * s + sx;
+                let py = y + gy * s + sy;
+
+                if px < 0 || py < 0 {
+                    continue;
+                }
+                let pxu = px as usize;
+                let pyu = py as usize;
+
+                if pxu >= fb_width || pyu >= fb_height {
+                    continue;
+                }
+
+                let idx = (pyu * fb_width + pxu) * 4;
+                frame[idx..idx + 4].copy_from_slice(&fg);
+            }
+        }
     }
 }

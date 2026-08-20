@@ -1,8 +1,28 @@
 use std::collections::HashMap;
 
-use crate::interpreter::{Command, parse_line, PrintPart, RuntimeError, RuntimeErrorKind};
-use crate::runtime::Runtime;
-use crate::audio;
+use crate:: {
+    audio::Audio,
+    interpreter:: {
+        parse_line,
+        Command,
+        PrintPart,
+        RuntimeError,
+        RuntimeErrorKind,
+    },
+    runtime:: {
+        Runtime,
+        Value
+    }
+};
+
+//////////////////////////////////
+/// STUCTS and ENUMS
+//////////////////////////////////
+#[derive(Debug, Clone)]
+pub enum VmEffect {
+    PlayTone { hz: u32, ms: u64 },
+    BeginInput { prompt: Option<String>, var: String },
+}
 
 #[derive(Debug, Clone)]
 pub struct ProgramLine {
@@ -20,56 +40,47 @@ pub struct Program {
     pub halted: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum VmEffect {
-    PlayTone { hz: u32, ms: u64 },
-}
-
-fn split_basic_line(raw: &str) -> (Option<u32>, &str) {
-    let s = raw.trim_start();
-    if s.is_empty() {
-        return (None, s);
-    }
-    if let Some((first, rest)) = s.split_once(char::is_whitespace) {
-        if first.chars().all(|c| c.is_ascii_digit()) {
-            if let Ok(n) = first.parse::<u32>() {
-                return (Some(n), rest.trim_start());
-            }
-        }
-    }
-    (None, s)
-}
-
-fn line_label(basic_line: Option<u32>, physical_line: usize) -> String {
-    match basic_line {
-        Some(n) => format!("BASIC line {}", n),
-        None => format!("file line {}", physical_line),
-    }
-}
-
+//////////////////////////////////
+/// PROGRAM Implementation
+//////////////////////////////////
 impl Program {
     pub fn from_source(source: &str) -> Result<Self, RuntimeError> {
         let mut lines = Vec::new();
         let mut line_index = HashMap::new();
 
-        for (idx, raw) in source.lines().enumerate() {
-            let physical_line = idx + 1;
-            let (basic_line, stmt) = split_basic_line(raw);
+        for (i, raw_line) in source.lines().enumerate() {
+            let physical_line = i + 1;
+            let raw = raw_line.to_string();
+            let trimmed = raw_line.trim();
+
+            if trimmed.is_empty() {
+                lines.push(ProgramLine {
+                    basic_line: None,
+                    physical_line,
+                    raw,
+                    stmt: String::new(),
+                });
+                continue;
+            }
+
+            // Optional BASIC line number prefix
+            let (basic_line, stmt) = parse_optional_line_number(trimmed);
 
             if let Some(n) = basic_line {
-                if line_index.insert(n, lines.len()).is_some() {
+                if line_index.contains_key(&n) {
                     return Err(RuntimeError {
                         kind: RuntimeErrorKind::Syntax,
                         message: format!("Duplicate BASIC line number {}", n),
                     });
                 }
+                line_index.insert(n, lines.len());
             }
 
             lines.push(ProgramLine {
                 basic_line,
-                stmt: stmt.to_string(),
-                raw: raw.to_string(),
                 physical_line,
+                raw,
+                stmt: stmt.to_string(),
             });
         }
 
@@ -167,10 +178,17 @@ impl Program {
                 self.pc += 1;
                 Ok(Some(VmEffect::PlayTone { hz, ms }))
             }
+            Command::Input { prompt, var } => {
+                self.pc += 1;
+                Ok(Some(VmEffect::BeginInput { prompt, var }))
+            }
         }
     }
 }
 
+//////////////////////////////////
+/// FUNCTIONS
+//////////////////////////////////
 fn with_line_context(
     e: RuntimeError,
     label: &str,
@@ -179,5 +197,24 @@ fn with_line_context(
     RuntimeError {
         kind: e.kind,
         message: format!("{label}: {} | source: {}", e.message, raw.trim()),
+    }
+}
+
+fn parse_optional_line_number(s: &str) -> (Option<u32>, &str) {
+    let mut split = s.splitn(2, char::is_whitespace);
+    let first = split.next().unwrap_or("");
+    let rest = split.next().unwrap_or("").trim_start();
+
+    if let Ok(n) = first.parse::<u32>() {
+        (Some(n), rest)
+    } else {
+        (None, s)
+    }
+}
+
+fn line_label(basic_line: Option<u32>, physical_line: usize) -> String {
+    match basic_line {
+        Some(n) => format!("BASIC line {}", n),
+        None => format!("file line {}", physical_line),
     }
 }
