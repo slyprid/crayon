@@ -14,5 +14,8 @@
 | ✅ | CLS | Clearing background, with basic 9 colors | |
 | ✅ | GOTO | Jump to line number | |
 | ✅ | SOUND | Play sound at a specified frequency and length | |
-| ️ | PALETTE | Maps individual color registers | Not Implemented | |
+| ⚠️ | PALETTE | Maps individual color registers | N/I |
+| ⚠️ | NEW | Clears Memory | N/I |
+| ⚠️ | RUN | Runs line number or entire program | N/I |
+| ⚠️ | LIST | Displays code in memory | N/I |
 ---
