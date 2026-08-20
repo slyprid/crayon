@@ -5,6 +5,7 @@ use std::fmt;
 pub enum RuntimeErrorKind {
     Syntax,
     DivideByZero,
+    TypeMismatch,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +20,7 @@ enum Op { Add, Sub, Mul, Div }
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Num(f64),
+    Var(String),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
     Mul(Box<Expr>, Box<Expr>),
@@ -29,11 +31,14 @@ pub enum Expr {
 pub enum PrintPart {
     Text(String),
     Expr(Expr),
+    StrVar(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Print(Vec<PrintPart>),
+    LetNum { name: String, expr: Expr },
+    LetStr { name: String, value: String },
     Cls(Option<ClsColor>), // None = no arg
     Goto(u32),
     Sound { tone: u8, len: u8 },
@@ -128,6 +133,35 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
             tone: tone_u16 as u8,
             len: len_u16 as u8,
         });
+    }
+
+    if upper.starts_with("LET ") {
+        let rest = s[3..].trim_start(); // after LET
+        let Some((lhs, rhs)) = rest.split_once('=') else {
+            return Err(RuntimeError::syntax("LET requires '='"));
+        };
+
+        let lhs = lhs.trim().to_ascii_uppercase();
+        let rhs = rhs.trim();
+
+        if lhs.starts_with('$') {
+            if !is_valid_str_var_name(&lhs) {
+                return Err(RuntimeError::syntax(format!("Invalid string variable '{}'", lhs)));
+            }
+            if !(rhs.starts_with('"') && rhs.ends_with('"') && rhs.len() >= 2) {
+                return Err(RuntimeError::type_mismatch(
+                    "Type Mismatch: string variable requires quoted string"
+                ));
+            }
+            let value = rhs[1..rhs.len()-1].to_string();
+            return Ok(Command::LetStr { name: lhs, value });
+        } else {
+            if !is_valid_var_name(&lhs) {
+                return Err(RuntimeError::syntax(format!("Invalid numeric variable '{}'", lhs)));
+            }
+            let expr = parse_expr(rhs)?; // numeric expression only
+            return Ok(Command::LetNum { name: lhs, expr });
+        }
     }
 
     Err(RuntimeError::syntax(("?SN ERROR: {s}")))
@@ -258,21 +292,34 @@ impl RuntimeError {
     pub fn divide_by_zero(msg: impl Into<String>) -> Self {
         Self { kind: RuntimeErrorKind::DivideByZero, message: msg.into() }
     }
+
+    pub fn type_mismatch(msg: impl Into<String>) -> Self {
+        Self { kind: RuntimeErrorKind::TypeMismatch, message: msg.into() }
+    }
 }
 
 impl Expr {
-    pub fn eval(&self) -> Result<f64, RuntimeError> {
+    pub fn eval(&self, rt: &crate::runtime::Runtime) -> Result<f64, RuntimeError> {
         match self {
             Expr::Num(n) => Ok(*n),
-            Expr::Add(a, b) => Ok(a.eval()? + b.eval()?),
-            Expr::Sub(a, b) => Ok(a.eval()? - b.eval()?),
-            Expr::Mul(a, b) => Ok(a.eval()? * b.eval()?),
-            Expr::Div(a, b) => {
-                let d = b.eval()?;
+            Expr::Var(name) => {
+                match rt.vars.get(name) {
+                    Some(crate::runtime::Value::Num(v)) => Ok(*v),
+                    Some(crate::runtime::Value::Str(_)) => Err(RuntimeError::type_mismatch(
+                        format!("Type Mismatch: string variable {} used in numeric expression", name)
+                    )),
+                    None => Err(RuntimeError::syntax(format!("Undefined variable {}", name))),
+                }
+            }
+            Expr::Add(a,b) => Ok(a.eval(rt)? + b.eval(rt)?),
+            Expr::Sub(a,b) => Ok(a.eval(rt)? - b.eval(rt)?),
+            Expr::Mul(a,b) => Ok(a.eval(rt)? * b.eval(rt)?),
+            Expr::Div(a,b) => {
+                let d = b.eval(rt)?;
                 if d == 0.0 {
                     return Err(RuntimeError::divide_by_zero("Division by zero"));
                 }
-                Ok(a.eval()? / d)
+                Ok(a.eval(rt)? / d)
             }
         }
     }
@@ -285,3 +332,18 @@ impl fmt::Display for RuntimeError {
 }
 
 impl std::error::Error for RuntimeError {}
+
+fn is_valid_var_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() || bytes.len() > 2 { return false; }
+    if !bytes[0].is_ascii_uppercase() { return false; }
+    if bytes.len() == 2 && !(bytes[1].is_ascii_uppercase() || bytes[1].is_ascii_digit()) {
+        return false;
+    }
+    true
+}
+
+fn is_valid_str_var_name(name: &str) -> bool {
+    if !name.starts_with('$') { return false; }
+    is_valid_var_name(&name[1..])
+}

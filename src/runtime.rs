@@ -1,4 +1,11 @@
 use crate::colors::{get_rgb, Colors};
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Num(f64),
+    Str(String),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClsColor {
@@ -18,6 +25,7 @@ pub struct Runtime {
     pub lines: Vec<String>,
     pub clear_requested: bool,
     pub bg_color: ClsColor, // last used background color
+    pub vars: HashMap<String, Value>,
 }
 
 impl Runtime {

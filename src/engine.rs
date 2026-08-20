@@ -108,28 +108,44 @@ impl Program {
                 self.pc += 1;
                 Ok(None)
             },
+            Command::LetNum { name, expr } => {
+                let v = expr.eval(rt)?;
+                rt.vars.insert(name, crate::runtime::Value::Num(v));
+                self.pc += 1;
+                Ok(None)
+            }
+            Command::LetStr { name, value } => {
+                rt.vars.insert(name, crate::runtime::Value::Str(value));
+                self.pc += 1;
+                Ok(None)
+            }
             Command::Print(parts) => {
                 let mut out = String::new();
-
                 for p in parts {
                     match p {
                         PrintPart::Text(t) => out.push_str(&t),
                         PrintPart::Expr(expr) => {
-                            let v = expr.eval()
-                                .map_err(|e| RuntimeError::syntax("{label}: PRINT expression error: {e}"))?;
-                            if v.fract() == 0.0 {
-                                out.push_str(&(v as i64).to_string());
-                            } else {
-                                out.push_str(&v.to_string());
+                            let v = expr.eval(rt)?;
+                            if v.fract() == 0.0 { out.push_str(&(v as i64).to_string()); }
+                            else { out.push_str(&v.to_string()); }
+                        }
+                        PrintPart::StrVar(name) => {
+                            match rt.vars.get(&name) {
+                                Some(crate::runtime::Value::Str(s)) => out.push_str(s),
+                                Some(crate::runtime::Value::Num(_)) => {
+                                    return Err(RuntimeError::type_mismatch(
+                                        format!("Type Mismatch: numeric variable {} used as string", name)
+                                    ));
+                                }
+                                None => return Err(RuntimeError::syntax(format!("Undefined variable {}", name))),
                             }
                         }
                     }
                 }
-
                 rt.print(out);
                 self.pc += 1;
                 Ok(None)
-            }
+            }                                
             Command::Cls(color) => {
                 rt.cls(color);
                 self.pc += 1;

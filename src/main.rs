@@ -118,6 +118,7 @@ impl App {
                     let user_msg = match e.kind {
                         interpreter::RuntimeErrorKind::Syntax => format!("?SN ERROR: {}", e.message),
                         interpreter::RuntimeErrorKind::DivideByZero => format!("?/0 ERROR: {}", e.message),
+                        interpreter::RuntimeErrorKind::TypeMismatch => format!("?TM ERROR: {}", e.message),
                     };
 
                     eprintln!("{}", user_msg);
