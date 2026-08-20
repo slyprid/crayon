@@ -115,8 +115,13 @@ impl App {
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    eprintln!("Interpreter error: {}", e);
-                    self.last_error = Some(e);
+                    let user_msg = match e.kind {
+                        interpreter::RuntimeErrorKind::Syntax => format!("?SN ERROR: {}", e.message),
+                        interpreter::RuntimeErrorKind::DivideByZero => format!("?/0 ERROR: {}", e.message),
+                    };
+
+                    eprintln!("{}", user_msg);
+                    self.last_error = Some(user_msg);
                     self.program.halted = true;
                     break;
                 }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::interpreter::{Command, parse_line, PrintPart};
+use crate::interpreter::{Command, parse_line, PrintPart, RuntimeError, RuntimeErrorKind};
 use crate::runtime::Runtime;
 use crate::audio;
 
@@ -48,7 +48,7 @@ fn line_label(basic_line: Option<u32>, physical_line: usize) -> String {
 }
 
 impl Program {
-    pub fn from_source(source: &str) -> Result<Self, String> {
+    pub fn from_source(source: &str) -> Result<Self, RuntimeError> {
         let mut lines = Vec::new();
         let mut line_index = HashMap::new();
 
@@ -58,7 +58,10 @@ impl Program {
 
             if let Some(n) = basic_line {
                 if line_index.insert(n, lines.len()).is_some() {
-                    return Err(format!("Duplicate BASIC line number {}", n));
+                    return Err(RuntimeError {
+                        kind: RuntimeErrorKind::Syntax,
+                        message: format!("Duplicate BASIC line number {}", n),
+                    });
                 }
             }
 
@@ -78,7 +81,7 @@ impl Program {
         })
     }
 
-    pub fn step(&mut self, rt: &mut Runtime) -> Result<Option<VmEffect>, String> {
+    pub fn step(&mut self, rt: &mut Runtime) -> Result<Option<VmEffect>, RuntimeError> {
         if self.halted {
             return Ok(None);
         }
@@ -90,8 +93,15 @@ impl Program {
         let cur = &self.lines[self.pc];
         let label = line_label(cur.basic_line, cur.physical_line);
 
-        let cmd = parse_line(&cur.stmt)
-            .map_err(|e| format!("{label}: {e} | source: {}", cur.raw.trim()))?;
+        let cmd = parse_line(&cur.stmt).map_err(|e| RuntimeError {
+            kind: e.kind,
+            message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
+        })?;
+
+        let cmd = parse_line(&cur.stmt).map_err(|e| RuntimeError {
+            kind: RuntimeErrorKind::Syntax,
+            message: format!("{label}: {} | source: {}", e, cur.raw.trim()),
+        })?;
 
         match cmd {
             Command::Empty => {
@@ -106,7 +116,7 @@ impl Program {
                         PrintPart::Text(t) => out.push_str(&t),
                         PrintPart::Expr(expr) => {
                             let v = expr.eval()
-                                .map_err(|e| format!("{label}: PRINT expression error: {e}"))?;
+                                .map_err(|e| RuntimeError::syntax("{label}: PRINT expression error: {e}"))?;
                             if v.fract() == 0.0 {
                                 out.push_str(&(v as i64).to_string());
                             } else {
@@ -127,7 +137,10 @@ impl Program {
             }
             Command::Goto(target) => {
                 let Some(&dest) = self.line_index.get(&target) else {
-                    return Err(format!("{label}: GOTO target {} not found", target));
+                    return Err(RuntimeError {
+                        kind: RuntimeErrorKind::Syntax,
+                        message: format!("{label}: GOTO target {} not found", target),
+                    });
                 };
                 self.pc = dest;
                 Ok(None)
@@ -139,5 +152,16 @@ impl Program {
                 Ok(Some(VmEffect::PlayTone { hz, ms }))
             }
         }
+    }
+}
+
+fn with_line_context(
+    e: RuntimeError,
+    label: &str,
+    raw: &str,
+) -> RuntimeError {
+    RuntimeError {
+        kind: e.kind,
+        message: format!("{label}: {} | source: {}", e.message, raw.trim()),
     }
 }
