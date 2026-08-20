@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::interpreter::{parse_line, Command};
+use crate::interpreter::{Command, parse_line, PrintPart};
 use crate::runtime::Runtime;
 use crate::audio;
 
@@ -98,8 +98,25 @@ impl Program {
                 self.pc += 1;
                 Ok(None)
             },
-            Command::Print(s) => {
-                rt.print(s);
+            Command::Print(parts) => {
+                let mut out = String::new();
+
+                for p in parts {
+                    match p {
+                        PrintPart::Text(t) => out.push_str(&t),
+                        PrintPart::Expr(expr) => {
+                            let v = expr.eval()
+                                .map_err(|e| format!("{label}: PRINT expression error: {e}"))?;
+                            if v.fract() == 0.0 {
+                                out.push_str(&(v as i64).to_string());
+                            } else {
+                                out.push_str(&v.to_string());
+                            }
+                        }
+                    }
+                }
+
+                rt.print(out);
                 self.pc += 1;
                 Ok(None)
             }
@@ -114,7 +131,7 @@ impl Program {
                 };
                 self.pc = dest;
                 Ok(None)
-            },
+            }
             Command::Sound { tone, len } => {
                 let hz = crate::audio::Audio::sound_to_hz(tone);
                 let ms = crate::audio::Audio::sound_len_to_ms(len);

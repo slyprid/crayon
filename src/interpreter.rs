@@ -1,8 +1,26 @@
 use crate::runtime::ClsColor;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Op { Add, Sub, Mul, Div }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Expr {
+    Num(f64),
+    Add(Box<Expr>, Box<Expr>),
+    Sub(Box<Expr>, Box<Expr>),
+    Mul(Box<Expr>, Box<Expr>),
+    Div(Box<Expr>, Box<Expr>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PrintPart {
+    Text(String),
+    Expr(Expr),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
-    Print(String),
+    Print(Vec<PrintPart>),
     Cls(Option<ClsColor>), // None = no arg
     Goto(u32),
     Sound { tone: u8, len: u8 },
@@ -45,22 +63,12 @@ pub fn parse_line(input: &str) -> Result<Command, String> {
     }
 
     if upper.starts_with("PRINT") {
-        eprintln!(">> COMMAND: PRINT");
-        let rest = s[5..].trim_start(); // after PRINT
+        let rest = s[5..].trim_start();
         if rest.is_empty() {
-            return Ok(Command::Print(String::new()));
+            return Ok(Command::Print(vec![PrintPart::Text(String::new())]));
         }
-
-        // Minimal v1:
-        // PRINT "HELLO"
-        // PRINT HELLO   (prints literal token as-is for now)
-        let text = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-            rest[1..rest.len() - 1].to_string()
-        } else {
-            rest.to_string()
-        };
-
-        return Ok(Command::Print(text));
+        let parts = parse_print_parts(rest)?;
+        return Ok(Command::Print(parts));
     }
 
     if upper.starts_with("GOTO") {
@@ -114,3 +122,132 @@ pub fn parse_line(input: &str) -> Result<Command, String> {
     Err(format!("Unsupported statement: {s}"))
 }
 
+impl Expr {
+    pub fn eval(&self) -> Result<f64, String> {
+        match self {
+            Expr::Num(n) => Ok(*n),
+            Expr::Add(a, b) => Ok(a.eval()? + b.eval()?),
+            Expr::Sub(a, b) => Ok(a.eval()? - b.eval()?),
+            Expr::Mul(a, b) => Ok(a.eval()? * b.eval()?),
+            Expr::Div(a, b) => {
+                let d = b.eval()?;
+                if d == 0.0 {
+                    return Err("division by zero".to_string());
+                }
+                Ok(a.eval()? / d)
+            }
+        }
+    }
+}
+
+fn parse_print_parts(mut s: &str) -> Result<Vec<PrintPart>, String> {
+    let mut parts = Vec::new();
+
+    while !s.trim_start().is_empty() {
+        s = s.trim_start();
+
+        if s.starts_with('"') {
+            // parse quoted text
+            let rest = &s[1..];
+            let Some(end) = rest.find('"') else {
+                return Err("Unterminated string in PRINT".to_string());
+            };
+            let text = &rest[..end];
+            parts.push(PrintPart::Text(text.to_string()));
+            s = &rest[end + 1..];
+        } else {
+            // parse expression until next quote or end
+            let end = s.find('"').unwrap_or(s.len());
+            let expr_src = s[..end].trim();
+            if !expr_src.is_empty() {
+                let expr = parse_expr(expr_src)?;
+                parts.push(PrintPart::Expr(expr));
+            }
+            s = &s[end..];
+        }
+    }
+
+    Ok(parts)
+}
+
+fn precedence(op: Op) -> u8 {
+    match op {
+        Op::Add | Op::Sub => 1,
+        Op::Mul | Op::Div => 2,
+    }
+}
+
+fn parse_expr(input: &str) -> Result<Expr, String> {
+    // tokenizer: numbers + operators + spaces
+    let mut vals: Vec<Expr> = Vec::new();
+    let mut ops: Vec<Op> = Vec::new();
+
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0usize;
+
+    fn apply_top(vals: &mut Vec<Expr>, ops: &mut Vec<Op>) -> Result<(), String> {
+        let op = ops.pop().ok_or("operator stack underflow")?;
+        let b = vals.pop().ok_or("missing right operand")?;
+        let a = vals.pop().ok_or("missing left operand")?;
+        let node = match op {
+            Op::Add => Expr::Add(Box::new(a), Box::new(b)),
+            Op::Sub => Expr::Sub(Box::new(a), Box::new(b)),
+            Op::Mul => Expr::Mul(Box::new(a), Box::new(b)),
+            Op::Div => Expr::Div(Box::new(a), Box::new(b)),
+        };
+        vals.push(node);
+        Ok(())
+    }
+
+    while i < chars.len() {
+        let c = chars[i];
+
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+
+        if c.is_ascii_digit() || c == '.' {
+            let start = i;
+            i += 1;
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+                i += 1;
+            }
+            let num_str: String = chars[start..i].iter().collect();
+            let n: f64 = num_str
+                .parse()
+                .map_err(|_| format!("Invalid number '{num_str}'"))?;
+            vals.push(Expr::Num(n));
+            continue;
+        }
+
+        let op = match c {
+            '+' => Op::Add,
+            '-' => Op::Sub,
+            '*' => Op::Mul,
+            '/' => Op::Div,
+            _ => return Err(format!("Unexpected token '{}' in expression", c)),
+        };
+
+        while let Some(top) = ops.last().copied() {
+            if precedence(top) >= precedence(op) {
+                apply_top(&mut vals, &mut ops)?;
+            } else {
+                break;
+            }
+        }
+
+        ops.push(op);
+        i += 1;
+    }
+
+    while !ops.is_empty() {
+        apply_top(&mut vals, &mut ops)?;
+    }
+
+    if vals.len() != 1 {
+        return Err(format!("Invalid expression '{}'", input));
+    }
+
+    Ok(vals.pop().unwrap())
+}
