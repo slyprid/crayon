@@ -18,4 +18,5 @@
 | ⚠️ | NEW | Clears Memory | N/I |
 | ⚠️ | RUN | Runs line number or entire program | N/I |
 | ⚠️ | LIST | Displays code in memory | N/I |
+| ✅ | INPUT | Displays a message and waits for user input | |
 ---
