@@ -14,4 +14,5 @@
 | ✅ | CLS | Clearing background, with basic 9 colors | |
 | ✅ | GOTO | Jump to line number | |
 | ✅ | SOUND | Play sound at a specified frequency and length | |
+| ️ | PALETTE | Maps individual color registers | Not Implemented | |
 ---
