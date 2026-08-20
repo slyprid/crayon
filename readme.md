@@ -4,7 +4,7 @@
 
 ## Keyword / Command Implementation
 <strong>All keywords currently implemented</strong>
-| Status | Keyword | Description |
+| Status | Keyword | Description | Note |
 |---|---|---|
 | ✅ | PRINT | Printing of strings, math expressions, and compound string/expressions |
 | ✅ | LET num | Creating numeric variables |
@@ -14,4 +14,8 @@
 | ✅ | CLS | Clearing background, with basic 9 colors |
 | ✅ | GOTO | Jump to line number |
 | ✅ | SOUND | Play sound at a specified frequency and length |
+| ⚠️| PALETTE | Maps individual color registers | Not Implemented |
+| ⚠️| NEW | Clears Memory | Not Implemented |
+| ⚠️| RUN | Runs line number or entire program | Not Implemented |
+| ⚠️| LIST | Displays code in memory | Not Implemented |
 ---
