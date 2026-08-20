@@ -158,6 +158,39 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         });
     }
 
+    if upper.starts_with("INPUT") {
+        let rest = s[5..].trim_start();
+        if rest.is_empty() {
+            return Err(RuntimeError::syntax("INPUT requires a variable"));
+        }
+
+        let (prompt, var_text) = if rest.starts_with('"') {
+            let after_quote = &rest[1..];
+            let Some(endq) = after_quote.find('"') else {
+                return Err(RuntimeError::syntax("Unterminated INPUT prompt string"));
+            };
+            let msg = after_quote[..endq].to_string();
+            let tail = after_quote[endq + 1..].trim_start();
+            if !tail.starts_with(';') {
+                return Err(RuntimeError::syntax("INPUT with message must use ';' before variable"));
+            }
+            (Some(msg), tail[1..].trim())
+        } else {
+            (None, rest.trim())
+        };
+
+        if var_text.is_empty() {
+            return Err(RuntimeError::syntax("INPUT requires a target variable"));
+        }
+
+        let var = var_text.to_ascii_uppercase();
+        if !(is_valid_num_var_name(&var) || is_valid_str_var_name(&var)) {
+            return Err(RuntimeError::syntax(format!("Invalid INPUT variable '{}'", var_text)));
+        }
+
+        return Ok(Command::Input { prompt, var });
+    }
+
     // Implicit assignment (no LET): A = 10 / X$ = "HELLO"
     // Kept late so PRINT/GOTO/etc. are not mistaken for assignment statements.
     if let Some((lhs_raw, _rhs_raw)) = s.split_once('=') {
@@ -167,7 +200,7 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         }
     }
 
-    Err(RuntimeError::syntax(("?SN ERROR: {s}")))
+    Err(RuntimeError::syntax(("?UNKNOWN ERROR: {s}")))
 }
 
 //////////////////////////////////

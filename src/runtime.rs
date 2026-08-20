@@ -1,23 +1,10 @@
-use crate::colors::{get_rgb, Colors};
+use crate::colors::{get_rgb, Colors, ClsColor};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Num(f64),
     Str(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClsColor {
-    Black,
-    Green,
-    Yellow,
-    Blue,
-    Red,
-    Buff,
-    Cyan,
-    Magenta,
-    Orange,
 }
 
 #[derive(Debug, Default)]

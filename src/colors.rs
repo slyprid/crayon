@@ -198,6 +198,19 @@ pub enum Colors {
     White = 0xFFFFFF,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClsColor {
+    Black,
+    Green,
+    Yellow,
+    Blue,
+    Red,
+    Buff,
+    Cyan,
+    Magenta,
+    Orange,
+}
+
 ///////////////////////////////////////
 /// FUNCTIONS
 ///////////////////////////////////////

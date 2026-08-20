@@ -215,10 +215,11 @@ impl App {
                             fb_height,
                             cursor_x,
                             y,
-                            2, // GLYPH002
+                            6, // GLYPH006
                             c,
                             None,
-                            1,
+                            6,
+                            8
                         );
                     }
                 }
@@ -248,51 +249,6 @@ impl App {
 
         if pixels.render().is_err() {
             // no event_loop here; caller handles close on next event
-        }
-
-        fn animate_input_cursor(&mut self) {
-            let Some(state) = self.input_state.as_mut() else { return };
-
-            state.frame_counter = state.frame_counter.wrapping_add(1);
-
-            // blink every ~20 frames
-            if state.frame_counter % 20 == 0 {
-                state.cursor_visible = !state.cursor_visible;
-            }
-
-            // color cycle every ~8 frames
-            if state.frame_counter % 8 == 0 {
-                state.cursor_phase = (state.cursor_phase + 1) % 8;
-            }
-        }
-
-        fn handle_input_key(&mut self, event: &winit::event::KeyEvent) -> bool {
-            // returns true when consumed by INPUT mode
-            let Some(state) = self.input_state.as_mut() else { return false };
-
-            use winit::event::ElementState;
-            if event.state != ElementState::Pressed {
-                return true;
-            }
-
-            match &event.logical_key {
-                Key::Named(NamedKey::Enter) => {
-                    self.commit_input();
-                }
-                Key::Named(NamedKey::Backspace) => {
-                    state.buffer.pop();
-                }
-                Key::Character(text) => {
-                    for ch in text.chars() {
-                        if !ch.is_control() {
-                            state.buffer.push(ch);
-                        }
-                    }
-                }
-                _ => {}
-            }
-
-            true
         }
     }
 
@@ -352,6 +308,51 @@ impl App {
 
         self.input_state = None;
     }
+
+    fn animate_input_cursor(&mut self) {
+        let Some(state) = self.input_state.as_mut() else { return };
+
+        state.frame_counter = state.frame_counter.wrapping_add(1);
+
+        // blink every ~20 frames
+        if state.frame_counter % 20 == 0 {
+            state.cursor_visible = !state.cursor_visible;
+        }
+
+        // color cycle every ~8 frames
+        if state.frame_counter % 8 == 0 {
+            state.cursor_phase = (state.cursor_phase + 1) % 8;
+        }
+    }
+
+    fn handle_input_key(&mut self, event: &winit::event::KeyEvent) -> bool {
+        // returns true when consumed by INPUT mode
+        let Some(state) = self.input_state.as_mut() else { return false };
+
+        use winit::event::ElementState;
+        if event.state != ElementState::Pressed {
+            return true;
+        }
+
+        match &event.logical_key {
+            Key::Named(NamedKey::Enter) => {
+                self.commit_input();
+            }
+            Key::Named(NamedKey::Backspace) => {
+                state.buffer.pop();
+            }
+            Key::Character(text) => {
+                for ch in text.chars() {
+                    if !ch.is_control() {
+                        state.buffer.push(ch);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        true
+    }
 }
 
 impl ApplicationHandler for App {
@@ -396,6 +397,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 self.tick_interpreter();
+                self.animate_input_cursor();
                 self.render();
             },
             WindowEvent::Resized(size) => {

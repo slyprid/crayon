@@ -143,29 +143,37 @@ pub fn draw_glyph(
     glyph_id: u16,
     fg: [u8; 4],
     _bg: Option<[u8; 4]>,
-    scale: u32,
+    scale_x: u32,
+    scale_y: u32,
 ) {
-    let Some(pixels) = crate::glyphs::glyph_pixels(glyph_id) else {
-        return;
-    };
+    let pixels = crate::glyphs::glyph_pixels(glyph_id as usize);
 
-    let s = scale as i32;
+    let ssx = scale_x as i32;
+    let ssy = scale_y as i32;
 
-    for &(gx, gy) in pixels {
+    for pair in pixels.chunks_exact(2) {
+        let gx = pair[0];
+        let gy = pair[1];
+
+        // skip unused sentinel entries (commonly -1,-1)
+        if gx < 0 || gy < 0 {
+            continue;
+        }
+
         let gx = gx as i32;
         let gy = gy as i32;
 
-        for sy in 0..s {
-            for sx in 0..s {
-                let px = x + gx * s + sx;
-                let py = y + gy * s + sy;
+        for sy in 0..ssy {
+            for sx in 0..ssx {
+                let px = x + gx * ssx + sx;
+                let py = y + gy * ssy + sy;
 
                 if px < 0 || py < 0 {
                     continue;
                 }
+
                 let pxu = px as usize;
                 let pyu = py as usize;
-
                 if pxu >= fb_width || pyu >= fb_height {
                     continue;
                 }

@@ -302,7 +302,7 @@ pub fn get_glyph(ch: char) -> [i8; GLYPH_PIXELS] {
 }
 
 #[inline]
-pub fn glyph_pixels(id: u16) -> [i8; GLYPH_PIXELS] { GLYPHS[id] }
+pub fn glyph_pixels(id: usize) -> [i8; GLYPH_PIXELS] { GLYPHS[id] }
 
 #[inline]
 pub fn get_glyph_ref(ch: char) -> &'static [i8; GLYPH_PIXELS] {
