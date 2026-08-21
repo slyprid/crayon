@@ -24,6 +24,7 @@ use winit:: {
     window::{Window, WindowAttributes, WindowId},
     dpi::{LogicalSize, Size},
 };
+use winit::event::ElementState;
 use colors::{Colors, get_color, get_rgb};
 
 ///////////////////////////////////////
@@ -45,6 +46,7 @@ struct App {
     last_error: Option<String>,
     audio: Option<audio::Audio>,
     input_state: Option<InputState>,
+    break_latched: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -107,6 +109,7 @@ impl App {
             last_error: None,
             audio: audio::Audio::new().ok(),
             input_state: None,
+            break_latched: false,
         }
     }
 
@@ -312,6 +315,11 @@ impl App {
     fn animate_input_cursor(&mut self) {
         let Some(state) = self.input_state.as_mut() else { return };
 
+        if self.break_latched {
+            state.cursor_visible = false;
+            return;
+        }
+
         state.frame_counter = state.frame_counter.wrapping_add(1);
 
         // blink every ~20 frames
@@ -353,6 +361,16 @@ impl App {
 
         true
     }
+
+    fn do_break(&mut self) {
+        self.program.halted = true;
+
+        let line = self.program.last_basic_line.unwrap_or(0);
+        self.runtime.print(format!("BREAK IN {}", line));
+        self.runtime.print("OK".to_string());
+
+        self.break_latched = true;
+    }
 }
 
 impl ApplicationHandler for App {
@@ -388,6 +406,25 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::KeyboardInput { event, .. } => {
+                if event.state == ElementState::Pressed {
+                    if let Key::Named(NamedKey::Escape) = &event.logical_key {
+                        // If currently running: break and show line
+                        if !self.program.halted {
+                            self.do_break();
+                            if let Some(window) = self.window.as_ref() {
+                                window.request_redraw();
+                            }
+                            return;
+                        }
+
+                        // If already halted: second ESC closes app
+                        if self.program.halted {
+                            event_loop.exit();
+                            return;
+                        }
+                    }
+                }
+
                 if self.handle_input_key(&event) {
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();

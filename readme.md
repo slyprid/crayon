@@ -19,4 +19,8 @@
 | ⚠️ | RUN | Runs line number or entire program | N/I |
 | ⚠️ | LIST | Displays code in memory | N/I |
 | ✅ | INPUT | Displays a message and waits for user input | |
+| ✅ | IF | Conditional logic | |
+| ✅ | THEN | Conditional logic | |
+| ✅ | ELSE | Conditional logic | |
+| ✅ | END | Stops execution of the program | |
 ---

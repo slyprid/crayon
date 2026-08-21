@@ -148,7 +148,7 @@ pub fn draw_glyph(
 ) {
     let pixels = crate::glyphs::glyph_pixels(glyph_id as usize);
 
-    let ssx = scale_x as i32;
+    let ssx = scale_x as i32; 
     let ssy = scale_y as i32;
 
     for pair in pixels.chunks_exact(2) {

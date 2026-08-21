@@ -4,7 +4,11 @@ use crate:: {
     audio::Audio,
     interpreter:: {
         parse_line,
+        CmpOp,
         Command,
+        CondExpr,
+        LogicOp,
+        Predicate,
         PrintPart,
         RuntimeError,
         RuntimeErrorKind,
@@ -38,6 +42,7 @@ pub struct Program {
     pub line_index: HashMap<u32, usize>,
     pub pc: usize,
     pub halted: bool,
+    pub last_basic_line: Option<u32>,
 }
 
 //////////////////////////////////
@@ -89,19 +94,19 @@ impl Program {
             line_index,
             pc: 0,
             halted: false,
+            last_basic_line: None,
         })
     }
 
     pub fn step(&mut self, rt: &mut Runtime) -> Result<Option<VmEffect>, RuntimeError> {
-        if self.halted {
-            return Ok(None);
-        }
+        if self.halted { return Ok(None); }
         if self.pc >= self.lines.len() {
             self.halted = true;
             return Ok(None);
         }
 
-        let cur = &self.lines[self.pc];
+        let cur = self.lines[self.pc].clone();
+        self.last_basic_line = cur.basic_line;
         let label = line_label(cur.basic_line, cur.physical_line);
 
         let cmd = parse_line(&cur.stmt).map_err(|e| RuntimeError {
@@ -109,78 +114,117 @@ impl Program {
             message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
         })?;
 
-        let cmd = parse_line(&cur.stmt).map_err(|e| RuntimeError {
-            kind: RuntimeErrorKind::Syntax,
-            message: format!("{label}: {} | source: {}", e, cur.raw.trim()),
-        })?;
+        self.execute_inline_command(rt, &cmd, &cur, &label)
+    }
 
+    fn execute_inline_command(
+        &mut self,
+        rt: &mut Runtime,
+        cmd: &Command,
+        cur: &ProgramLine,
+        label: &str,
+    ) -> Result<Option<VmEffect>, RuntimeError> {
         match cmd {
             Command::Empty => {
                 self.pc += 1;
                 Ok(None)
-            },
-            Command::LetNum { name, expr } => {
-                let v = expr.eval(rt)?;
-                rt.vars.insert(name, crate::runtime::Value::Num(v));
-                self.pc += 1;
-                Ok(None)
             }
-            Command::LetStr { name, value } => {
-                rt.vars.insert(name, crate::runtime::Value::Str(value));
-                self.pc += 1;
-                Ok(None)
-            }
+
             Command::Print(parts) => {
                 let mut out = String::new();
                 for p in parts {
                     match p {
-                        PrintPart::Text(t) => out.push_str(&t),
+                        PrintPart::Text(t) => out.push_str(t),
                         PrintPart::Expr(expr) => {
-                            let v = expr.eval(rt)?;
+                            let v = expr.eval(rt).map_err(|e| RuntimeError {
+                                kind: e.kind,
+                                message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
+                            })?;
                             if v.fract() == 0.0 { out.push_str(&(v as i64).to_string()); }
                             else { out.push_str(&v.to_string()); }
                         }
-                        PrintPart::StrVar(name) => {
-                            match rt.vars.get(&name) {
-                                Some(crate::runtime::Value::Str(s)) => out.push_str(s),
-                                Some(crate::runtime::Value::Num(_)) => {
-                                    return Err(RuntimeError::type_mismatch(
-                                        format!("Type Mismatch: numeric variable {} used as string", name)
-                                    ));
-                                }
-                                None => return Err(RuntimeError::syntax(format!("Undefined variable {}", name))),
+                        PrintPart::StrVar(name) => match rt.vars.get(name) {
+                            Some(Value::Str(s)) => out.push_str(s),
+                            Some(Value::Num(_)) => {
+                                return Err(RuntimeError::type_mismatch(format!(
+                                    "{label}: Type Mismatch: numeric variable {} used as string | source: {}",
+                                    name, cur.raw.trim()
+                                )));
                             }
-                        }
+                            None => {
+                                return Err(RuntimeError::syntax(format!(
+                                    "{label}: Undefined variable {} | source: {}",
+                                    name, cur.raw.trim()
+                                )));
+                            }
+                        },
                     }
                 }
                 rt.print(out);
                 self.pc += 1;
                 Ok(None)
-            }                                
-            Command::Cls(color) => {
-                rt.cls(color);
+            }
+
+            Command::LetNum { name, expr } => {
+                let v = expr.eval(rt).map_err(|e| RuntimeError {
+                    kind: e.kind,
+                    message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
+                })?;
+                rt.vars.insert(name.clone(), Value::Num(v));
                 self.pc += 1;
                 Ok(None)
             }
+
+            Command::LetStr { name, value } => {
+                rt.vars.insert(name.clone(), Value::Str(value.clone()));
+                self.pc += 1;
+                Ok(None)
+            }
+
+            Command::Input { prompt, var } => {
+                self.pc += 1;
+                Ok(Some(VmEffect::BeginInput { prompt: prompt.clone(), var: var.clone() }))
+            }
+
+            Command::IfThenElse { cond, then_cmd, else_cmd } => {
+                let ok = eval_cond_expr(rt, cond)?;
+                if ok {
+                    self.execute_inline_command(rt, then_cmd, cur, label)
+                } else if let Some(ec) = else_cmd {
+                    self.execute_inline_command(rt, ec, cur, label)
+                } else {
+                    self.pc += 1;
+                    Ok(None)
+                }
+            }
+
+            Command::Cls(color) => {
+                rt.cls(*color);
+                self.pc += 1;
+                Ok(None)
+            }
+
             Command::Goto(target) => {
-                let Some(&dest) = self.line_index.get(&target) else {
-                    return Err(RuntimeError {
-                        kind: RuntimeErrorKind::Syntax,
-                        message: format!("{label}: GOTO target {} not found", target),
-                    });
+                let Some(&dest) = self.line_index.get(target) else {
+                    return Err(RuntimeError::syntax(format!(
+                        "{label}: GOTO target {} not found | source: {}",
+                        target, cur.raw.trim()
+                    )));
                 };
                 self.pc = dest;
                 Ok(None)
             }
+
             Command::Sound { tone, len } => {
-                let hz = crate::audio::Audio::sound_to_hz(tone);
-                let ms = crate::audio::Audio::sound_len_to_ms(len);
+                let hz = Audio::sound_to_hz(*tone);
+                let ms = Audio::sound_len_to_ms(*len);
                 self.pc += 1;
                 Ok(Some(VmEffect::PlayTone { hz, ms }))
             }
-            Command::Input { prompt, var } => {
-                self.pc += 1;
-                Ok(Some(VmEffect::BeginInput { prompt, var }))
+
+            Command::End => {
+                self.halted = true;
+                Ok(None)
             }
         }
     }
@@ -216,5 +260,55 @@ fn line_label(basic_line: Option<u32>, physical_line: usize) -> String {
     match basic_line {
         Some(n) => format!("BASIC line {}", n),
         None => format!("file line {}", physical_line),
+    }
+}
+
+fn eval_cond_expr(rt: &Runtime, c: &CondExpr) -> Result<bool, RuntimeError> {
+    let mut acc = eval_pred(rt, &c.first)?;
+    for (op, pred) in &c.rest {
+        let rhs = eval_pred(rt, pred)?;
+        acc = match op {
+            LogicOp::And => acc && rhs,
+            LogicOp::Or => acc || rhs,
+        };
+    }
+    Ok(acc)
+}
+
+fn eval_pred(rt: &Runtime, p: &Predicate) -> Result<bool, RuntimeError> {
+    match p {
+        Predicate::NumCmp { left, op, right } => {
+            let a = left.eval(rt)?;
+            let b = right.eval(rt)?;
+            Ok(match op {
+                CmpOp::Eq => a == b,
+                CmpOp::Ne => a != b,
+                CmpOp::Lt => a < b,
+                CmpOp::Le => a <= b,
+                CmpOp::Gt => a > b,
+                CmpOp::Ge => a >= b,
+            })
+        }
+        Predicate::StrCmp { left_var, op, right_lit } => {
+            let lv = rt.vars.get(left_var).ok_or_else(|| RuntimeError::syntax(format!(
+                "Undefined variable {}", left_var
+            )))?;
+            let s = match lv {
+                Value::Str(v) => v.as_str(),
+                Value::Num(_) => {
+                    return Err(RuntimeError::type_mismatch(format!(
+                        "Type Mismatch: numeric variable {} used in string comparison", left_var
+                    )));
+                }
+            };
+            Ok(match op {
+                CmpOp::Eq => s == right_lit,
+                CmpOp::Ne => s != right_lit,
+                CmpOp::Lt => s < right_lit.as_str(),
+                CmpOp::Le => s <= right_lit.as_str(),
+                CmpOp::Gt => s > right_lit.as_str(),
+                CmpOp::Ge => s >= right_lit.as_str(),
+            })
+        }
     }
 }

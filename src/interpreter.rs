@@ -17,6 +17,12 @@ pub enum Command {
     Cls(Option<ClsColor>), // None = no arg
     Goto(u32),
     Sound { tone: u8, len: u8 },
+    IfThenElse {
+        cond: CondExpr,
+        then_cmd: Box<Command>,
+        else_cmd: Option<Box<Command>>,
+    },
+    End,
     Empty,
 }
 
@@ -36,6 +42,16 @@ pub struct RuntimeError {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Op { Add, Sub, Mul, Div }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CmpOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Num(f64),
@@ -51,6 +67,24 @@ pub enum PrintPart {
     Text(String),
     Expr(Expr),
     StrVar(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Predicate {
+    NumCmp { left: Expr, op: CmpOp, right: Expr },
+    StrCmp { left_var: String, op: CmpOp, right_lit: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicOp {
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CondExpr {
+    pub first: Predicate,
+    pub rest: Vec<(LogicOp, Predicate)>, // left-associative
 }
 
 //////////////////////////////////////////
@@ -158,6 +192,7 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         });
     }
 
+    // INPUT: Wait for user input and store it to variable
     if upper.starts_with("INPUT") {
         let rest = s[5..].trim_start();
         if rest.is_empty() {
@@ -198,6 +233,16 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         if is_valid_num_var_name(&lhs) || is_valid_str_var_name(&lhs) {
             return parse_assignment_core(s);
         }
+    }
+
+    // IF THEN ELSE: Conditional logic
+    if upper.starts_with("IF ") {
+        return parse_if_command(s);
+    }
+
+    // END: Stop program execution
+    if upper == "END" {
+        return Ok(Command::End);
     }
 
     Err(RuntimeError::syntax(("?UNKNOWN ERROR: {s}")))
@@ -464,4 +509,185 @@ fn is_valid_str_var_name(name: &str) -> bool {
     }
     let core = &name[..name.len() - 1];
     is_valid_num_var_name(core)
+}
+
+fn parse_if_command(s: &str) -> Result<Command, RuntimeError> {
+    let body = s[2..].trim_start(); // after IF
+    let then_pos = find_kw_outside_quotes(body, "THEN")
+        .ok_or_else(|| RuntimeError::syntax("IF missing THEN"))?;
+
+    let cond_src = body[..then_pos].trim();
+    let after_then = body[then_pos + 4..].trim();
+
+    if cond_src.is_empty() {
+        return Err(RuntimeError::syntax("IF condition is empty"));
+    }
+    if after_then.is_empty() {
+        return Err(RuntimeError::syntax("THEN statement is empty"));
+    }
+
+    let else_pos = find_kw_outside_quotes(after_then, "ELSE");
+    let (then_src, else_src) = if let Some(p) = else_pos {
+        (after_then[..p].trim(), Some(after_then[p + 4..].trim()))
+    } else {
+        (after_then.trim(), None)
+    };
+
+    if then_src.is_empty() {
+        return Err(RuntimeError::syntax("THEN statement is empty"));
+    }
+
+    let cond = parse_cond_expr(cond_src)?;
+    let then_cmd = Box::new(parse_then_else_stmt(then_src)?);
+    let else_cmd = match else_src {
+        Some(es) if !es.is_empty() => Some(Box::new(parse_then_else_stmt(es)?)),
+        Some(_) => return Err(RuntimeError::syntax("ELSE statement is empty")),
+        None => None,
+    };
+
+    Ok(Command::IfThenElse { cond, then_cmd, else_cmd })
+}
+
+fn parse_cond_expr(src: &str) -> Result<CondExpr, RuntimeError> {
+    let toks = split_logic_ops(src)?;
+    if toks.is_empty() { return Err(RuntimeError::syntax("Empty IF condition")); }
+
+    let first = parse_predicate(&toks[0])?;
+    let mut rest = Vec::new();
+
+    let mut i = 1usize;
+    while i + 1 < toks.len() {
+        let op = match toks[i].to_ascii_uppercase().as_str() {
+            "AND" => LogicOp::And,
+            "OR" => LogicOp::Or,
+            _ => return Err(RuntimeError::syntax(format!("Invalid logical operator '{}'", toks[i]))),
+        };
+        let pred = parse_predicate(&toks[i + 1])?;
+        rest.push((op, pred));
+        i += 2;
+    }
+
+    if i != toks.len() {
+        return Err(RuntimeError::syntax("Malformed IF condition"));
+    }
+
+    Ok(CondExpr { first, rest })
+}
+
+fn parse_predicate(src: &str) -> Result<Predicate, RuntimeError> {
+    let s = src.trim();
+    let (left_s, op, right_s) = split_cmp(s)?;
+
+    let left_u = left_s.trim().to_ascii_uppercase();
+    let right_t = right_s.trim();
+
+    // string form: X$ <op> "LIT"
+    if is_valid_str_var_name(&left_u) {
+        if !(right_t.starts_with('"') && right_t.ends_with('"') && right_t.len() >= 2) {
+            return Err(RuntimeError::type_mismatch(
+                "Type Mismatch: string comparison requires quoted string literal",
+            ));
+        }
+        let lit = right_t[1..right_t.len()-1].to_string();
+        return Ok(Predicate::StrCmp { left_var: left_u, op, right_lit: lit });
+    }
+
+    // numeric compare
+    let left = parse_expr(&left_s.to_ascii_uppercase())?;
+    let right = parse_expr(&right_s.to_ascii_uppercase())?;
+    Ok(Predicate::NumCmp { left, op, right })
+}
+
+fn split_cmp(s: &str) -> Result<(&str, CmpOp, &str), RuntimeError> {
+    let ops = [("<=", CmpOp::Le), (">=", CmpOp::Ge), ("<>", CmpOp::Ne), ("=", CmpOp::Eq), ("<", CmpOp::Lt), (">", CmpOp::Gt)];
+    let mut in_q = false;
+    for i in 0..s.len() {
+        let ch = s.as_bytes()[i] as char;
+        if ch == '"' { in_q = !in_q; continue; }
+        if in_q { continue; }
+        for (tok, op) in ops {
+            if s[i..].starts_with(tok) {
+                let l = s[..i].trim();
+                let r = s[i + tok.len()..].trim();
+                if l.is_empty() || r.is_empty() {
+                    return Err(RuntimeError::syntax("Invalid comparison"));
+                }
+                return Ok((l, op, r));
+            }
+        }
+    }
+    Err(RuntimeError::syntax("IF predicate missing comparison operator"))
+}
+
+fn split_logic_ops(src: &str) -> Result<Vec<String>, RuntimeError> {
+    let mut out = Vec::<String>::new();
+    let mut in_q = false;
+    let bytes = src.as_bytes();
+    let mut start = 0usize;
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        let ch = bytes[i] as char;
+        if ch == '"' { in_q = !in_q; i += 1; continue; }
+
+        if !in_q {
+            if is_kw_at(src, i, "AND") || is_kw_at(src, i, "OR") {
+                let part = src[start..i].trim();
+                if part.is_empty() { return Err(RuntimeError::syntax("Malformed logical condition")); }
+                out.push(part.to_string());
+
+                let kw = if is_kw_at(src, i, "AND") { "AND" } else { "OR" };
+                out.push(kw.to_string());
+                i += kw.len();
+                start = i;
+                continue;
+            }
+        }
+        i += 1;
+    }
+
+    let tail = src[start..].trim();
+    if tail.is_empty() { return Err(RuntimeError::syntax("Malformed logical condition")); }
+    out.push(tail.to_string());
+    Ok(out)
+}
+
+fn find_kw_outside_quotes(s: &str, kw: &str) -> Option<usize> {
+    let mut in_q = false;
+    let mut i = 0usize;
+    while i < s.len() {
+        let ch = s.as_bytes()[i] as char;
+        if ch == '"' { in_q = !in_q; i += 1; continue; }
+        if !in_q && is_kw_at(s, i, kw) {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn is_kw_at(s: &str, i: usize, kw: &str) -> bool {
+    if i + kw.len() > s.len() { return false; }
+    if !s[i..i+kw.len()].eq_ignore_ascii_case(kw) { return false; }
+    let left_ok = i == 0 || !is_word_char(s.as_bytes()[i - 1] as char);
+    let right_ok = i + kw.len() == s.len() || !is_word_char(s.as_bytes()[i + kw.len()] as char);
+    left_ok && right_ok
+}
+fn is_word_char(c: char) -> bool { c.is_ascii_alphanumeric() || c == '_' }
+
+fn parse_then_else_stmt(src: &str) -> Result<Command, RuntimeError> {
+    let t = src.trim();
+    if t.is_empty() {
+        return Err(RuntimeError::syntax("Empty THEN/ELSE statement"));
+    }
+
+    // BASIC shorthand: THEN 100  => GOTO 100
+    if t.chars().all(|c| c.is_ascii_digit()) {
+        let n: u32 = t
+            .parse()
+            .map_err(|_| RuntimeError::syntax(format!("Invalid line number '{}'", t)))?;
+        return Ok(Command::Goto(n));
+    }
+
+    parse_line(t)
 }
