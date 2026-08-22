@@ -316,8 +316,34 @@ impl Program {
             }
 
             Command::Sound { tone, len } => {
-                let hz = Audio::sound_to_hz(*tone);
-                let ms = Audio::sound_len_to_ms(*len);
+                let tone_v = tone.eval(rt).map_err(|e| RuntimeError {
+                    kind: e.kind,
+                    message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
+                })?;
+                let len_v = len.eval(rt).map_err(|e| RuntimeError {
+                    kind: e.kind,
+                    message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
+                })?;
+
+                // BASIC-like integer coercion; feel free to switch to strict integer-only checks
+                let tone_i = tone_v.round() as i64;
+                let len_i = len_v.round() as i64;
+
+                if !(1..=255).contains(&tone_i) {
+                    return Err(RuntimeError::syntax(format!(
+                        "{label}: SOUND tone out of range 1..255, got {} | source: {}",
+                        tone_i, cur.raw.trim()
+                    )));
+                }
+                if !(1..=255).contains(&len_i) {
+                    return Err(RuntimeError::syntax(format!(
+                        "{label}: SOUND length out of range 1..255, got {} | source: {}",
+                        len_i, cur.raw.trim()
+                    )));
+                }
+
+                let hz = Audio::sound_to_hz(tone_i as u8);
+                let ms = Audio::sound_len_to_ms(len_i as u8);
                 self.pc += 1;
                 Ok(Some(VmEffect::PlayTone { hz, ms }))
             }

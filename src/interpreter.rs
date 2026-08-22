@@ -18,7 +18,7 @@ pub enum Command {
     Input { prompt: Option<String>, var: String },
     Cls(Option<ClsColor>), // None = no arg
     Goto(u32),
-    Sound { tone: u8, len: u8 },
+    Sound { tone: Expr, len: Expr },
     IfThenElse {
         cond: CondExpr,
         then_cmd: Box<Command>,
@@ -169,29 +169,16 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         let tone_s = parts.next().unwrap_or_default();
         let len_s = parts.next().unwrap_or_default();
 
-        // reject missing or extra args
         if tone_s.is_empty() || len_s.is_empty() || parts.next().is_some() {
-            return Err(RuntimeError::syntax("SOUND format is SOUND tone,length with both values 1..255, got '{arg_text}'"));
+            return Err(RuntimeError::syntax(
+                "SOUND format is SOUND tone,length with both values 1..255",
+            ));
         }
 
-        let tone_u16: u16 = tone_s
-            .parse()
-            .map_err(|_| RuntimeError::syntax(format!("SOUND tone must be integer 1..255, got '{tone_s}'")))?;
-        let len_u16: u16 = len_s
-            .parse()
-            .map_err(|_| RuntimeError::syntax(format!("SOUND length must be integer 1..255, got '{len_s}'")))?;
+        let tone = parse_expr(&tone_s.to_ascii_uppercase())?;
+        let len = parse_expr(&len_s.to_ascii_uppercase())?;
 
-        if !(1..=255).contains(&tone_u16) {
-            return Err(RuntimeError::syntax(format!("SOUND tone out of range 1..255, got {}", tone_u16)));
-        }
-        if !(1..=255).contains(&len_u16) {
-            return Err(RuntimeError::syntax(format!("SOUND length out of range 1..255, got {}", len_u16)));
-        }
-
-        return Ok(Command::Sound {
-            tone: tone_u16 as u8,
-            len: len_u16 as u8,
-        });
+        return Ok(Command::Sound { tone, len });
     }
 
     // INPUT: Wait for user input and store it to variable
