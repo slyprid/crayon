@@ -13,6 +13,8 @@ pub enum Command {
     Print(Vec<PrintPart>),
     LetNum { name: String, expr: Expr },
     LetStr { name: String, value: String },
+    For { name: String, start: Expr, end: Expr },
+    Next { name: String },
     Input { prompt: Option<String>, var: String },
     Cls(Option<ClsColor>), // None = no arg
     Goto(u32),
@@ -245,6 +247,27 @@ pub fn parse_line(input: &str) -> Result<Command, RuntimeError> {
         return Ok(Command::End);
     }
 
+    // FOR: FOR X = 1 TO 10
+    if upper.starts_with("FOR ") {
+        let rest = s[3..].trim_start(); // everything after FOR
+        return parse_for_command(rest);
+    }
+
+    // NEXT: NEXT X
+    if upper.starts_with("NEXT") {
+        let rest = s[4..].trim();
+        if rest.is_empty() {
+            return Err(RuntimeError::syntax("NEXT requires a loop variable"));
+        }
+
+        let name = rest.to_ascii_uppercase();
+        if !is_valid_num_var_name(&name) {
+            return Err(RuntimeError::syntax(format!("Invalid NEXT variable '{}'", rest)));
+        }
+
+        return Ok(Command::Next { name });
+    }
+
     Err(RuntimeError::syntax(("?UNKNOWN ERROR: {s}")))
 }
 
@@ -277,6 +300,34 @@ fn parse_assignment_core(text: &str) -> Result<Command, RuntimeError> {
         let expr = parse_expr(&rhs.to_ascii_uppercase())?;
         Ok(Command::LetNum { name: lhs, expr })
     }
+}
+
+fn parse_for_command(text: &str) -> Result<Command, RuntimeError> {
+    let Some((lhs_raw, rest_raw)) = text.split_once('=') else {
+        return Err(RuntimeError::syntax("FOR requires '='"));
+    };
+
+    let name = lhs_raw.trim().to_ascii_uppercase();
+    if !is_valid_num_var_name(&name) {
+        return Err(RuntimeError::syntax(format!("Invalid FOR variable '{}'", lhs_raw.trim())));
+    }
+
+    let Some(to_pos) = find_kw_outside_quotes(rest_raw, "TO") else {
+        return Err(RuntimeError::syntax("FOR missing TO"));
+    };
+
+    let start_src = rest_raw[..to_pos].trim();
+    let end_src = rest_raw[to_pos + 2..].trim();
+    if start_src.is_empty() {
+        return Err(RuntimeError::syntax("FOR start expression is empty"));
+    }
+    if end_src.is_empty() {
+        return Err(RuntimeError::syntax("FOR end expression is empty"));
+    }
+
+    let start = parse_expr(&start_src.to_ascii_uppercase())?;
+    let end = parse_expr(&end_src.to_ascii_uppercase())?;
+    Ok(Command::For { name, start, end })
 }
 
 fn parse_print_parts(mut s: &str) -> Result<Vec<PrintPart>, RuntimeError> {

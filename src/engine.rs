@@ -20,7 +20,7 @@ use crate:: {
 };
 
 //////////////////////////////////
-/// STUCTS and ENUMS
+/// STRUCTS and ENUMS
 //////////////////////////////////
 #[derive(Debug, Clone)]
 pub enum VmEffect {
@@ -43,6 +43,14 @@ pub struct Program {
     pub pc: usize,
     pub halted: bool,
     pub last_basic_line: Option<u32>,
+    for_stack: Vec<ForFrame>,
+}
+
+#[derive(Debug, Clone)]
+struct ForFrame {
+    var: String,
+    end: f64,
+    for_pc: usize,
 }
 
 //////////////////////////////////
@@ -95,6 +103,7 @@ impl Program {
             pc: 0,
             halted: false,
             last_basic_line: None,
+            for_stack: Vec::new(),
         })
     }
 
@@ -181,6 +190,78 @@ impl Program {
                 Ok(None)
             }
 
+            Command::For { name, start, end } => {
+                let start_value = start.eval(rt).map_err(|e| RuntimeError {
+                    kind: e.kind,
+                    message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
+                })?;
+                let end_value = end.eval(rt).map_err(|e| RuntimeError {
+                    kind: e.kind,
+                    message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
+                })?;
+
+                rt.vars.insert(name.clone(), Value::Num(start_value));
+
+                if start_value > end_value {
+                    let next_pc = self.find_matching_next(self.pc).map_err(|e| RuntimeError {
+                        kind: e.kind,
+                        message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
+                    })?;
+                    self.pc = next_pc + 1;
+                } else {
+                    self.for_stack.push(ForFrame {
+                        var: name.clone(),
+                        end: end_value,
+                        for_pc: self.pc,
+                    });
+                    self.pc += 1;
+                }
+                Ok(None)
+            }
+
+            Command::Next { name } => {
+                let Some(frame) = self.for_stack.last().cloned() else {
+                    return Err(RuntimeError::syntax(format!(
+                        "{label}: NEXT {} without FOR | source: {}",
+                        name, cur.raw.trim()
+                    )));
+                };
+
+                if frame.var != *name {
+                    return Err(RuntimeError::syntax(format!(
+                        "{label}: NEXT {} does not match FOR {} | source: {}",
+                        name, frame.var, cur.raw.trim()
+                    )));
+                }
+
+                let current = match rt.vars.get(name) {
+                    Some(Value::Num(v)) => *v,
+                    Some(Value::Str(_)) => {
+                        return Err(RuntimeError::type_mismatch(format!(
+                            "{label}: Type Mismatch: string variable {} used as FOR counter | source: {}",
+                            name, cur.raw.trim()
+                        )));
+                    }
+                    None => {
+                        return Err(RuntimeError::syntax(format!(
+                            "{label}: Undefined FOR counter {} | source: {}",
+                            name, cur.raw.trim()
+                        )));
+                    }
+                };
+
+                let next_value = current + 1.0;
+                rt.vars.insert(name.clone(), Value::Num(next_value));
+
+                if next_value <= frame.end {
+                    self.pc = frame.for_pc + 1;
+                } else {
+                    self.for_stack.pop();
+                    self.pc += 1;
+                }
+                Ok(None)
+            }
+
             Command::Input { prompt, var } => {
                 self.pc += 1;
                 Ok(Some(VmEffect::BeginInput { prompt: prompt.clone(), var: var.clone() }))
@@ -227,6 +308,26 @@ impl Program {
                 Ok(None)
             }
         }
+    }
+
+    fn find_matching_next(&self, for_pc: usize) -> Result<usize, RuntimeError> {
+        let mut depth = 0usize;
+
+        for i in for_pc + 1..self.lines.len() {
+            let line = &self.lines[i];
+            match parse_line(&line.stmt)? {
+                Command::For { .. } => depth += 1,
+                Command::Next { .. } => {
+                    if depth == 0 {
+                        return Ok(i);
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+
+        Err(RuntimeError::syntax("FOR without matching NEXT"))
     }
 }
 
