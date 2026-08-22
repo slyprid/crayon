@@ -50,6 +50,7 @@ pub struct Program {
 struct ForFrame {
     var: String,
     end: f64,
+    step: f64,
     for_pc: usize,
 }
 
@@ -190,7 +191,7 @@ impl Program {
                 Ok(None)
             }
 
-            Command::For { name, start, end } => {
+            Command::For { name, start, end, step } => {
                 let start_value = start.eval(rt).map_err(|e| RuntimeError {
                     kind: e.kind,
                     message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
@@ -199,6 +200,17 @@ impl Program {
                     kind: e.kind,
                     message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
                 })?;
+                let step_v = step.eval(rt).map_err(|e| RuntimeError {
+                    kind: e.kind,
+                    message: format!("{label}: {} | source: {}", e.message, cur.raw.trim()),
+                })?;
+
+                if step_v == 0.0 {
+                    return Err(RuntimeError::syntax(format!(
+                        "{label}: FOR STEP cannot be 0 | source: {}",
+                        cur.raw.trim()
+                    )));
+                }
 
                 rt.vars.insert(name.clone(), Value::Num(start_value));
 
@@ -212,6 +224,7 @@ impl Program {
                     self.for_stack.push(ForFrame {
                         var: name.clone(),
                         end: end_value,
+                        step: step_v,
                         for_pc: self.pc,
                     });
                     self.pc += 1;
@@ -250,10 +263,16 @@ impl Program {
                     }
                 };
 
-                let next_value = current + 1.0;
+                let next_value = current + frame.step;
                 rt.vars.insert(name.clone(), Value::Num(next_value));
 
-                if next_value <= frame.end {
+                let keep_going = if frame.step > 0.0 {
+                    next_value <= frame.end
+                } else {
+                    next_value >= frame.end
+                };
+
+                if keep_going {
                     self.pc = frame.for_pc + 1;
                 } else {
                     self.for_stack.pop();

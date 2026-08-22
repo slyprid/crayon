@@ -23,6 +23,9 @@
 | ✅ | THEN | Conditional logic | |
 | ✅ | ELSE | Conditional logic | |
 | ✅ | END | Stops execution of the program | |
+| ✅ | FOR | Starts a loop | |
+| ✅ | NEXT | Continues a loop | |
+| ✅ | STEP | Increments a loop by a value | |
 ---
 
 ## License

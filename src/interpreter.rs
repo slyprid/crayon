@@ -13,7 +13,7 @@ pub enum Command {
     Print(Vec<PrintPart>),
     LetNum { name: String, expr: Expr },
     LetStr { name: String, value: String },
-    For { name: String, start: Expr, end: Expr },
+    For { name: String, start: Expr, end: Expr, step: Expr },
     Next { name: String },
     Input { prompt: Option<String>, var: String },
     Cls(Option<ClsColor>), // None = no arg
@@ -303,8 +303,8 @@ fn parse_assignment_core(text: &str) -> Result<Command, RuntimeError> {
 }
 
 fn parse_for_command(text: &str) -> Result<Command, RuntimeError> {
-    let Some((lhs_raw, rest_raw)) = text.split_once('=') else {
-        return Err(RuntimeError::syntax("FOR requires '='"));
+    let Some((lhs_raw, rhs_raw)) = text.split_once('=') else {
+        return Err(RuntimeError::syntax("FOR requires '=' (FOR X = start TO end [STEP step])"));
     };
 
     let name = lhs_raw.trim().to_ascii_uppercase();
@@ -312,22 +312,39 @@ fn parse_for_command(text: &str) -> Result<Command, RuntimeError> {
         return Err(RuntimeError::syntax(format!("Invalid FOR variable '{}'", lhs_raw.trim())));
     }
 
-    let Some(to_pos) = find_kw_outside_quotes(rest_raw, "TO") else {
+    let rhs = rhs_raw.trim();
+    let Some(to_pos) = find_kw_outside_quotes(rhs, "TO") else {
         return Err(RuntimeError::syntax("FOR missing TO"));
     };
 
-    let start_src = rest_raw[..to_pos].trim();
-    let end_src = rest_raw[to_pos + 2..].trim();
-    if start_src.is_empty() {
-        return Err(RuntimeError::syntax("FOR start expression is empty"));
+    let start_src = rhs[..to_pos].trim();
+    let after_to = rhs[to_pos + 2..].trim();
+    if start_src.is_empty() || after_to.is_empty() {
+        return Err(RuntimeError::syntax("FOR requires start and end expressions"));
     }
+
+    // optional STEP
+    let (end_src, step_src_opt) = if let Some(step_pos) = find_kw_outside_quotes(after_to, "STEP") {
+        let e = after_to[..step_pos].trim();
+        let st = after_to[step_pos + 4..].trim();
+        (e, Some(st))
+    } else {
+        (after_to, None)
+    };
+
     if end_src.is_empty() {
-        return Err(RuntimeError::syntax("FOR end expression is empty"));
+        return Err(RuntimeError::syntax("FOR requires end expression"));
     }
 
     let start = parse_expr(&start_src.to_ascii_uppercase())?;
     let end = parse_expr(&end_src.to_ascii_uppercase())?;
-    Ok(Command::For { name, start, end })
+    let step = match step_src_opt {
+        Some(src) if !src.is_empty() => parse_expr(&src.to_ascii_uppercase())?,
+        Some(_) => return Err(RuntimeError::syntax("FOR STEP requires an expression")),
+        None => Expr::Num(1.0),
+    };
+
+    return Ok(Command::For { name, start, end, step });
 }
 
 fn parse_print_parts(mut s: &str) -> Result<Vec<PrintPart>, RuntimeError> {
